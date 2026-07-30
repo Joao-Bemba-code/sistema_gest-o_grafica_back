@@ -1,0 +1,25 @@
+# Dependências
+node_modules/
+
+# Ficheiros de ambiente e segredos (NUNCA commitar)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Uploads e dados
+uploads/
+*.sql
+*.sql.gz
+backups/
+
+# Logs
+*.log
+
+# Sistemas
+.DS_Store
+Thumbs.db
+desktop.ini
