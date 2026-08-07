@@ -35,7 +35,7 @@ app.use((err, req, res, next) => {
 
 const PORTA = process.env.port || 8000;
 
-sequelize.sync({ alter: true }).then(() => {
+sequelize.sync().then(() => {
   app.listen(PORTA, () => {
     console.log(`Servidor rodando na porta ${PORTA}`);
   });
