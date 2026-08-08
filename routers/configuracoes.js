@@ -13,11 +13,11 @@ const storage = multer.diskStorage({
 });
 const upload = multer({
   storage,
-  limits: { fileSize: 2 * 1024 * 1024 },
+  limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowed = /\.(png|jpg|jpeg|svg|gif)$/i;
     if (allowed.test(path.extname(file.originalname))) return cb(null, true);
-    cb(new Error("Formato de imagem inválido. Use PNG, JPG ou SVG"));
+    cb(new Error("Formato de imagem inválido. Use PNG, JPG, SVG ou GIF"));
   },
 });
 
@@ -32,7 +32,17 @@ router.put("/sistema", Controller.guardarSistema);
 router.get("/seguranca", Controller.buscarSeguranca);
 router.put("/seguranca", Controller.guardarSeguranca);
 
-router.post("/logo", upload.single("logo"), Controller.uploadLogo);
+router.post("/logo", (req, res) => {
+  upload.single("logo")(req, res, (err) => {
+    if (err) {
+      if (err.code === "LIMIT_FILE_SIZE") {
+        return res.status(400).json({ erro: "O logo excede o tamanho máximo de 5MB" });
+      }
+      return res.status(400).json({ erro: err.message || "Falha ao processar a imagem" });
+    }
+    Controller.uploadLogo(req, res);
+  });
+});
 
 router.get("/utilizador", Controller.buscarUtilizadorAtual);
 router.put("/alterar-email", Controller.alterarEmail);
