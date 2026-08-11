@@ -158,6 +158,34 @@ exports.libertarMateriais = async (req, res) => {
       return res.json({ mensagem: "Materiais já foram libertados", ordem: await OrdemProducao.findByPk(ordem.id, { include: includeOrdem() }) });
     }
     const b = req.body || {};
+    const existentes = await ReservaEstoque.findAll({
+      where: {
+        organizacao_id: req.organizacao_id,
+        ordem_producao_id: ordem.id,
+        estado: ["ativa", "parcial"],
+      },
+      transaction: t,
+    });
+    const jaReservados = new Set(existentes.map((r) => r.material_id));
+    const novos = (Array.isArray(b.itens_materiais) ? b.itens_materiais : []).filter(
+      (i) => i && i.material_id && !jaReservados.has(Number(i.material_id))
+    );
+    if (novos.length) {
+      try {
+        await estoqueService.reservarMateriais({
+          organizacaoId: req.organizacao_id,
+          ordemProducaoId: ordem.id,
+          itens: novos,
+          usuarioId: req.usuario.id,
+          transaction: t,
+        });
+      } catch (erroReserva) {
+        await t.rollback();
+        return res.status(erroReserva.status || 422).json({
+          erro: erroReserva.message || "Estoque insuficiente para reservar materiais",
+        });
+      }
+    }
     await estoqueService.baixarReservas({
       organizacaoId: req.organizacao_id,
       ordemProducaoId: ordem.id,

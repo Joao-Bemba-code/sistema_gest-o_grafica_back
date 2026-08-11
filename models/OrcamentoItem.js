@@ -8,6 +8,8 @@ const OrcamentoItem = sequelize.define("orcamento_item", {
   quantidade: { type: DataTypes.INTEGER, defaultValue: 1 },
   preco_unit: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
   total: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
+  composto: { type: DataTypes.BOOLEAN, defaultValue: false },
+  margem: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
 });
 
 module.exports = OrcamentoItem;

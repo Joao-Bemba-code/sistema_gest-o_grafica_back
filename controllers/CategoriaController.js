@@ -34,3 +34,22 @@ exports.remover = async (req, res) => {
     return res.status(500).json({ erro: "Erro ao remover categoria" });
   }
 };
+
+exports.atualizar = async (req, res) => {
+  try {
+    const categoria = await Categoria.findOne({
+      where: { id: req.params.id, organizacao_id: req.organizacao_id },
+    });
+    if (!categoria) return res.status(404).json({ erro: "Categoria não encontrada" });
+    const dados = { ...req.body };
+    delete dados.id;
+    delete dados.organizacao_id;
+    if (dados.campos_especificacao !== undefined && !Array.isArray(dados.campos_especificacao)) {
+      return res.status(422).json({ erro: "campos_especificacao deve ser uma lista" });
+    }
+    await categoria.update(dados);
+    return res.json(categoria);
+  } catch (e) {
+    return res.status(500).json({ erro: "Erro ao atualizar categoria" });
+  }
+};

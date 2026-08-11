@@ -10,6 +10,10 @@ const Categoria = sequelize.define("categoria", {
     type: DataTypes.ENUM("papel", "insumo", "acabamento", "produto"),
     defaultValue: "papel",
   },
+  campos_especificacao: {
+    type: DataTypes.JSON,
+    defaultValue: [],
+  },
 });
 
 module.exports = Categoria;

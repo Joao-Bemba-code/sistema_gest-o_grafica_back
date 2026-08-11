@@ -14,6 +14,7 @@ const Orcamento = sequelize.define("orcamento", {
   papel: { type: DataTypes.STRING(200) },
   impressao: { type: DataTypes.STRING(200) },
   acabamento: { type: DataTypes.TEXT },
+  especificacao_json: { type: DataTypes.JSON },
   prazo_execucao: { type: DataTypes.STRING(100) },
   condicoes_pagamento: { type: DataTypes.STRING(100) },
   iva: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },

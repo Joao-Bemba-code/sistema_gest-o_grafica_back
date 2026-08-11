@@ -31,15 +31,78 @@ async function seed() {
       },
     });
 
+    const CAMPOS_PADRAO = {
+      Papel: [
+        { chave: "gramagem", rotulo: "Gramagem", tipo: "numero", unidade: "g/m²" },
+        { chave: "cor", rotulo: "Cor", tipo: "selecao", opcoes: ["Branco", "Creme", "Off-white", "Colorido"] },
+        { chave: "formato", rotulo: "Formato", tipo: "texto" },
+        { chave: "tipo", rotulo: "Tipo", tipo: "selecao", opcoes: ["Couché", "Offset", "Autocopiativo", "Cartolina", "Etiqueta"] },
+        { chave: "largura", rotulo: "Largura", tipo: "numero", unidade: "cm" },
+        { chave: "altura", rotulo: "Altura", tipo: "numero", unidade: "cm" },
+      ],
+      Tintas: [
+        { chave: "cor", rotulo: "Cor", tipo: "selecao", opcoes: ["Preto", "Ciano", "Magenta", "Amarelo", "Verniz", "Outro"] },
+        { chave: "base", rotulo: "Base", tipo: "selecao", opcoes: ["Água", "Solvente", "UV", "Óleo"] },
+        { chave: "marca", rotulo: "Marca", tipo: "texto" },
+        { chave: "secagem", rotulo: "Secagem", tipo: "texto" },
+      ],
+      Lonas: [
+        { chave: "largura", rotulo: "Largura", tipo: "numero", unidade: "m" },
+        { chave: "gramagem", rotulo: "Gramagem", tipo: "numero", unidade: "g/m²" },
+        { chave: "acabamento", rotulo: "Acabamento", tipo: "selecao", opcoes: ["Brilhante", "Fosca", "Backlit", "Frontlit"] },
+      ],
+      Vinil: [
+        { chave: "largura", rotulo: "Largura", tipo: "numero", unidade: "m" },
+        { chave: "adesivo", rotulo: "Adesivo", tipo: "selecao", opcoes: ["Permanente", "Removível", "Cast"] },
+        { chave: "espessura", rotulo: "Espessura", tipo: "numero", unidade: "µm" },
+      ],
+      Cola: [
+        { chave: "tipo", rotulo: "Tipo", tipo: "texto" },
+        { chave: "secagem", rotulo: "Secagem", tipo: "texto" },
+        { chave: "embalagem", rotulo: "Embalagem", tipo: "texto" },
+      ],
+      Chapas: [
+        { chave: "tipo", rotulo: "Tipo", tipo: "selecao", opcoes: ["CTP", "PS", "Química"] },
+        { chave: "espessura", rotulo: "Espessura", tipo: "numero", unidade: "mm" },
+        { chave: "tamanho", rotulo: "Tamanho", tipo: "texto" },
+      ],
+      "Papéis e Mídias": [
+        { chave: "gramagem", rotulo: "Gramagem", tipo: "numero", unidade: "g/m²" },
+        { chave: "cor", rotulo: "Cor", tipo: "selecao", opcoes: ["Branco", "Creme", "Off-white", "Colorido"] },
+        { chave: "formato", rotulo: "Formato", tipo: "texto" },
+        { chave: "tipo", rotulo: "Tipo", tipo: "selecao", opcoes: ["Couché", "Offset", "Autocopiativo", "Cartolina", "Etiqueta"] },
+        { chave: "largura", rotulo: "Largura", tipo: "numero", unidade: "cm" },
+        { chave: "altura", rotulo: "Altura", tipo: "numero", unidade: "cm" },
+      ],
+      "Insumos e Consumíveis": [
+        { chave: "marca", rotulo: "Marca", tipo: "texto" },
+        { chave: "tipo", rotulo: "Tipo", tipo: "texto" },
+      ],
+      "Acabamento e Logística": [
+        { chave: "tipo", rotulo: "Tipo", tipo: "texto" },
+      ],
+      "Produtos Prontos": [
+        { chave: "descricao_tecnica", rotulo: "Descrição técnica", tipo: "area" },
+      ],
+    };
+
+    async function criarCategoria(dados) {
+      const campos = CAMPOS_PADRAO[dados.nome] || [];
+      const [categoria] = await Categoria.findOrCreate({
+        where: { organizacao_id: org.id, nome: dados.nome },
+        defaults: { organizacao_id: org.id, ...dados, campos_especificacao: campos },
+      });
+      const atuais = categoria.campos_especificacao;
+      if (!Array.isArray(atuais) || atuais.length === 0) {
+        await categoria.update({ campos_especificacao: campos });
+      }
+      return categoria;
+    }
+
     const categoriasPadrao = ["Papel", "Tintas", "Lonas", "Vinil", "Cola", "Chapas"];
-    await Promise.all(
-      categoriasPadrao.map((nome) =>
-        Categoria.findOrCreate({
-          where: { organizacao_id: org.id, nome },
-          defaults: { organizacao_id: org.id, nome, tipo: "material" },
-        })
-      )
-    );
+    for (const nome of categoriasPadrao) {
+      await criarCategoria({ nome, tipo: "material" });
+    }
 
     const gruposPadrao = [
       { nome: "Papéis e Mídias", grupo: "papel", tipo: "material" },
@@ -47,14 +110,9 @@ async function seed() {
       { nome: "Acabamento e Logística", grupo: "acabamento", tipo: "material" },
       { nome: "Produtos Prontos", grupo: "produto", tipo: "produto" },
     ];
-    await Promise.all(
-      gruposPadrao.map((c) =>
-        Categoria.findOrCreate({
-          where: { organizacao_id: org.id, nome: c.nome },
-          defaults: { organizacao_id: org.id, nome: c.nome, tipo: c.tipo, grupo: c.grupo },
-        })
-      )
-    );
+    for (const c of gruposPadrao) {
+      await criarCategoria(c);
+    }
 
     console.log("✅ Seed concluído!");
     console.log("📧 Email: admin@cenffor.co.ao");

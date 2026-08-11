@@ -1,22 +1,47 @@
-const { sequelize, Orcamento, OrcamentoItem, Cliente } = require("../models");
+const { sequelize, Orcamento, OrcamentoItem, OrcamentoMaterial, Cliente, Sequencia } = require("../models");
+const { Transaction } = require("sequelize");
 const validador = require("../validators/orcamento");
 
 const ESTADOS = ["pendente", "aprovado", "cancelado", "rejeitado"];
 
+function includeCompleto() {
+  return [
+    { model: Cliente },
+    { model: OrcamentoItem, include: [{ model: OrcamentoMaterial, as: "materiais" }] },
+  ];
+}
+
+function valorLegadoEspec(spec) {
+  const ler = (chaves) => {
+    for (const k of chaves) {
+      const v = spec[k];
+      if (v !== undefined && v !== null && String(v).trim() !== "") return String(v);
+    }
+    return undefined;
+  };
+  return {
+    produto: ler(["produto", "Produto"]),
+    formato: ler(["formato", "Formato"]),
+    papel: ler(["papel", "Papel", "papel/material", "Papel/Material", "Material"]),
+    impressao: ler(["impressao", "Impressao", "impressão", "Impressão", "Tipo de impressão", "Tipo de impressão *"]),
+    acabamento: ler(["acabamento", "Acabamento"]),
+  };
+}
+
 function normalizarDados(body) {
-  const spec = body.especificacao || {};
+  const spec = body.especificacao && typeof body.especificacao === "object" ? body.especificacao : {};
   const dados = {
     cliente_id: body.cliente_id,
-    produto: spec.produto,
-    formato: spec.formato,
-    papel: spec.papel,
-    impressao: spec.impressao,
-    acabamento: spec.acabamento,
     prazo_execucao: body.prazoExecucao,
     condicoes_pagamento: body.condicoesPagamento,
     iva: body.iva != null ? body.iva : 0,
     observacoes: body.observacoes,
   };
+  if (Object.keys(spec).length) dados.especificacao_json = spec;
+  const legado = valorLegadoEspec(spec);
+  Object.keys(legado).forEach((k) => {
+    if (legado[k] !== undefined) dados[k] = legado[k];
+  });
   if (body.numero) dados.numero = body.numero;
   if (body.estado) dados.estado = body.estado;
   if (body.validade != null) dados.validade = body.validade;
@@ -32,11 +57,29 @@ function normalizarItens(itens) {
     .map((i) => {
       const quantidade = parseInt(i.quantidade, 10) || 0;
       const precoUnit = parseFloat(i.preco_unit != null ? i.preco_unit : i.valorUnitario) || 0;
+      const materiais = (i.materiais || [])
+        .map((m) => {
+          const qtd = parseFloat(m.quantidade) || 0;
+          const custoUnit = parseFloat(m.custo_unit) || 0;
+          return {
+            material_id: m.material_id || null,
+            descricao: String(m.descricao || "").trim() || "Material",
+            unidade: m.unidade || "un",
+            quantidade: qtd,
+            custo_unit: custoUnit,
+            custo_total: Number((qtd * custoUnit).toFixed(2)),
+            mover_estoque: Boolean(m.mover_estoque),
+          };
+        })
+        .filter((m) => m.material_id || m.descricao);
       return {
         descricao: i.descricao,
         quantidade,
         preco_unit: precoUnit,
         total: quantidade * precoUnit,
+        composto: Boolean(i.composto),
+        margem: parseFloat(i.margem) || 0,
+        materiais,
       };
     })
     .filter((i) => i.descricao && String(i.descricao).trim());
@@ -50,6 +93,18 @@ function serializar(o) {
     quantidade: Number(i.quantidade) || 0,
     valorUnitario: Number(i.preco_unit) || 0,
     total: Number(i.total) || 0,
+    composto: Boolean(i.composto),
+    margem: Number(i.margem) || 0,
+    materiais: (i.materiais || []).map((m) => ({
+      id: m.id,
+      material_id: m.material_id,
+      descricao: m.descricao,
+      unidade: m.unidade,
+      quantidade: Number(m.quantidade) || 0,
+      custo_unit: Number(m.custo_unit) || 0,
+      custo_total: Number(m.custo_total) || 0,
+      mover_estoque: Boolean(m.mover_estoque),
+    })),
   }));
   return {
     id: o.id,
@@ -67,6 +122,7 @@ function serializar(o) {
       email: cli.email || "",
     },
     especificacao: {
+      ...(o.especificacao_json && typeof o.especificacao_json === "object" ? o.especificacao_json : {}),
       produto: o.produto || "",
       formato: o.formato || "",
       papel: o.papel || "",
@@ -87,20 +143,14 @@ function serializar(o) {
 
 async function proximoNumero(organizacao_id) {
   return sequelize.transaction(async (t) => {
-    await sequelize.query(
-      `INSERT INTO sequencia (organizacao_id, numero) VALUES (?, 1)
-       ON DUPLICATE KEY UPDATE numero = numero`,
-      { replacements: [organizacao_id], transaction: t }
-    );
-    const [rows] = await sequelize.query(
-      `SELECT numero FROM sequencia WHERE organizacao_id = ? FOR UPDATE`,
-      { replacements: [organizacao_id], transaction: t }
-    );
-    const novo = Number(rows[0]?.numero || 0) + 1;
-    await sequelize.query(
-      `UPDATE sequencia SET numero = ? WHERE organizacao_id = ?`,
-      { replacements: [novo, organizacao_id], transaction: t }
-    );
+    const lock = sequelize.getDialect() === "mysql" ? Transaction.LOCK.UPDATE : undefined;
+    let seq = await Sequencia.findOne({ where: { organizacao_id }, transaction: t, lock });
+    if (!seq) {
+      seq = await Sequencia.create({ organizacao_id, numero: 1 }, { transaction: t });
+      return "ORC-0001";
+    }
+    const novo = Number(seq.numero || 0) + 1;
+    await seq.update({ numero: novo }, { transaction: t });
     return `ORC-${String(novo).padStart(4, "0")}`;
   });
 }
@@ -112,7 +162,7 @@ exports.listar = async (req, res) => {
     if (estado) where.estado = estado;
     const orcamentos = await Orcamento.findAll({
       where,
-      include: [Cliente, OrcamentoItem],
+      include: includeCompleto(),
       order: [["createdAt", "DESC"]],
     });
     return res.json(orcamentos.map(serializar));
@@ -126,7 +176,7 @@ exports.buscarPorId = async (req, res) => {
   try {
     const orcamento = await Orcamento.findOne({
       where: { id: req.params.id, organizacao_id: req.organizacao_id },
-      include: [Cliente, OrcamentoItem],
+      include: includeCompleto(),
     });
     if (!orcamento) return res.status(404).json({ erro: "Orçamento não encontrado" });
     return res.json(serializar(orcamento));
@@ -151,10 +201,17 @@ exports.criar = async (req, res) => {
     });
     const items = normalizarItens(req.body.itens);
     if (items.length) {
-      await OrcamentoItem.bulkCreate(items.map((i) => ({ ...i, orcamento_id: orcamento.id })));
+      const criados = await OrcamentoItem.bulkCreate(items.map((i) => ({ ...i, orcamento_id: orcamento.id })));
+      const materiais = [];
+      criados.forEach((itemDb, idx) => {
+        for (const m of items[idx].materiais || []) {
+          materiais.push({ ...m, orcamento_item_id: itemDb.id });
+        }
+      });
+      if (materiais.length) await OrcamentoMaterial.bulkCreate(materiais);
     }
     await recalcularTotais(orcamento.id);
-    const completo = await Orcamento.findByPk(orcamento.id, { include: [Cliente, OrcamentoItem] });
+    const completo = await Orcamento.findByPk(orcamento.id, { include: includeCompleto() });
     return res.status(201).json(serializar(completo));
   } catch (e) {
     console.error("Erro ao criar orçamento:", e);
@@ -173,14 +230,23 @@ exports.atualizar = async (req, res) => {
     delete dados.numero;
     await orcamento.update(dados);
     if (req.body.itens) {
+      const idsItens = (await OrcamentoItem.findAll({ where: { orcamento_id: orcamento.id }, attributes: ["id"] })).map((i) => i.id);
+      if (idsItens.length) await OrcamentoMaterial.destroy({ where: { orcamento_item_id: idsItens } });
       await OrcamentoItem.destroy({ where: { orcamento_id: orcamento.id } });
       const items = normalizarItens(req.body.itens);
       if (items.length) {
-        await OrcamentoItem.bulkCreate(items.map((i) => ({ ...i, orcamento_id: orcamento.id })));
+        const criados = await OrcamentoItem.bulkCreate(items.map((i) => ({ ...i, orcamento_id: orcamento.id })));
+        const materiais = [];
+        criados.forEach((itemDb, idx) => {
+          for (const m of items[idx].materiais || []) {
+            materiais.push({ ...m, orcamento_item_id: itemDb.id });
+          }
+        });
+        if (materiais.length) await OrcamentoMaterial.bulkCreate(materiais);
       }
     }
     await recalcularTotais(orcamento.id);
-    const completo = await Orcamento.findByPk(orcamento.id, { include: [Cliente, OrcamentoItem] });
+    const completo = await Orcamento.findByPk(orcamento.id, { include: includeCompleto() });
     return res.json(serializar(completo));
   } catch (e) {
     console.error("Erro ao atualizar orçamento:", e);
@@ -194,6 +260,8 @@ exports.remover = async (req, res) => {
       where: { id: req.params.id, organizacao_id: req.organizacao_id },
     });
     if (!orcamento) return res.status(404).json({ erro: "Orçamento não encontrado" });
+    const idsItens = (await OrcamentoItem.findAll({ where: { orcamento_id: orcamento.id }, attributes: ["id"] })).map((i) => i.id);
+    if (idsItens.length) await OrcamentoMaterial.destroy({ where: { orcamento_item_id: idsItens } });
     await OrcamentoItem.destroy({ where: { orcamento_id: orcamento.id } });
     await orcamento.destroy();
     return res.json({ mensagem: "Orçamento removido com sucesso" });

@@ -7,6 +7,7 @@ const Material = require("./Material");
 const MovimentoEstoque = require("./MovimentoEstoque");
 const Orcamento = require("./Orcamento");
 const OrcamentoItem = require("./OrcamentoItem");
+const OrcamentoMaterial = require("./OrcamentoMaterial");
 const OrdemProducao = require("./OrdemProducao");
 const PreImpressao = require("./PreImpressao");
 const Impressao = require("./Impressao");
@@ -47,6 +48,10 @@ Cliente.hasMany(Orcamento, { foreignKey: "cliente_id" });
 Orcamento.belongsTo(Cliente, { foreignKey: "cliente_id" });
 Orcamento.hasMany(OrcamentoItem, { foreignKey: "orcamento_id" });
 OrcamentoItem.belongsTo(Orcamento, { foreignKey: "orcamento_id" });
+OrcamentoItem.hasMany(OrcamentoMaterial, { foreignKey: "orcamento_item_id", as: "materiais" });
+OrcamentoMaterial.belongsTo(OrcamentoItem, { foreignKey: "orcamento_item_id" });
+Material.hasMany(OrcamentoMaterial, { foreignKey: "material_id" });
+OrcamentoMaterial.belongsTo(Material, { foreignKey: "material_id" });
 
 Organizacao.hasMany(OrdemProducao, { foreignKey: "organizacao_id" });
 OrdemProducao.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
@@ -111,6 +116,7 @@ module.exports = {
   MovimentoEstoque,
   Orcamento,
   OrcamentoItem,
+  OrcamentoMaterial,
   OrdemProducao,
   PreImpressao,
   Impressao,

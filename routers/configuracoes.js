@@ -4,8 +4,10 @@ const path = require("path");
 const Controller = require("../controllers/ConfiguracoesController");
 const auth = require("../protect/auth");
 
+const UPLOADS = process.env.SIGRAF_UPLOADS || path.join(__dirname, "..", "uploads");
+
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, "uploads/"),
+  destination: (req, file, cb) => cb(null, UPLOADS),
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname);
     cb(null, `logo_${req.organizacao_id}_${Date.now()}${ext}`);

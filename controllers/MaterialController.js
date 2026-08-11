@@ -60,7 +60,7 @@ exports.listar = async (req, res) => {
   try {
     const materiais = await Material.findAll({
       where: { organizacao_id: req.organizacao_id },
-      include: [{ model: Categoria, as: "categoria", attributes: ["id", "nome", "grupo", "tipo"] }],
+      include: [{ model: Categoria, as: "categoria", attributes: ["id", "nome", "grupo", "tipo", "campos_especificacao"] }],
       order: [["nome", "ASC"]],
     });
     return res.json(materiais.map(serializar));
@@ -75,7 +75,7 @@ exports.buscarPorId = async (req, res) => {
     const material = await Material.findOne({
       where: { id: req.params.id, organizacao_id: req.organizacao_id },
       include: [
-        { model: Categoria, as: "categoria", attributes: ["id", "nome", "grupo", "tipo"] },
+        { model: Categoria, as: "categoria", attributes: ["id", "nome", "grupo", "tipo", "campos_especificacao"] },
         { model: MovimentoEstoque, limit: 50, order: [["createdAt", "DESC"]] },
         { model: ReservaEstoque, limit: 50, order: [["createdAt", "DESC"]] },
       ],
