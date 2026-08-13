@@ -34,6 +34,7 @@ function criarApp(opcoes = {}) {
     app.use("/api/configuracoes", require("./routers/configuracoes"));
     app.use("/api/fornecedores", require("./routers/fornecedores"));
     app.use("/api/backup", require("./routers/backup"));
+    app.use("/api/sync", require("./routers/sync"));
   }
 
   return app;
