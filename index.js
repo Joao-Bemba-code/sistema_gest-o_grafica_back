@@ -14,7 +14,11 @@ const PORTA = process.env.port || 8000;
 
 sequelize
   .sync()
-  .then(() => {
+  .then(async () => {
+    if ((process.env.Lang || "mysql").toLowerCase() !== "sqlite") {
+      const { aplicarMigracoesMysql } = require("./migrarMysql");
+      await aplicarMigracoesMysql(sequelize);
+    }
     app.listen(PORTA, () => {
       console.log(`Servidor rodando na porta ${PORTA}`);
     });

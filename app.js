@@ -10,6 +10,7 @@ fs.mkdirSync(UPLOADS, { recursive: true });
 
 function criarApp(opcoes = {}) {
   const app = express();
+  app.set("trust proxy", true);
   app.use(cors());
   app.use(sanitize);
   app.use("/api", (req, res, next) => {

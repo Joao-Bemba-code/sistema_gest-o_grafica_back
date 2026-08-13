@@ -1,6 +1,7 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { Usuario, Organizacao } = require("../models");
+const { registarFalha, limparFalhas } = require("../protect/loginLimit");
 
 exports.login = async (req, res) => {
   try {
@@ -10,15 +11,19 @@ exports.login = async (req, res) => {
     }
     const usuario = await Usuario.findOne({ where: { email }, include: [Organizacao] });
     if (!usuario) {
+      registarFalha(req);
       return res.status(401).json({ erro: "Credenciais inválidas" });
     }
     if (!usuario.ativo) {
+      registarFalha(req);
       return res.status(401).json({ erro: "Usuário inativo" });
     }
     const senhaOk = await bcrypt.compare(senha, usuario.senha);
     if (!senhaOk) {
+      registarFalha(req);
       return res.status(401).json({ erro: "Credenciais inválidas" });
     }
+    limparFalhas(req);
     const token = jwt.sign(
       { id: usuario.id, organizacao_id: usuario.organizacao_id, funcao: usuario.funcao },
       process.env.SECRET,
