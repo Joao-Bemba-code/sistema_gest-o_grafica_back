@@ -17,6 +17,7 @@ const ReservaEstoque = require("./ReservaEstoque");
 const Faturacao = require("./Faturacao");
 const Sistema = require("./Sistema");
 const Seguranca = require("./Seguranca");
+const ConfiguracaoEmail = require("./ConfiguracaoEmail");
 const Fornecedor = require("./Fornecedor");
 const Sequencia = require("./Sequencia");
 const Pedido = require("./Pedido");
@@ -104,6 +105,9 @@ Sistema.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
 Organizacao.hasOne(Seguranca, { foreignKey: "organizacao_id" });
 Seguranca.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
 
+Organizacao.hasOne(ConfiguracaoEmail, { foreignKey: "organizacao_id" });
+ConfiguracaoEmail.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
+
 Organizacao.hasOne(Sequencia, { foreignKey: "organizacao_id" });
 Sequencia.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
 
@@ -135,6 +139,7 @@ module.exports = {
   Faturacao,
   Sistema,
   Seguranca,
+  ConfiguracaoEmail,
   Sequencia,
   Pedido,
   PedidoItem,
