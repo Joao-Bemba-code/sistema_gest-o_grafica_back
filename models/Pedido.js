@@ -7,7 +7,6 @@ const Pedido = sequelize.define("pedido", {
   numero: { type: DataTypes.STRING(20), allowNull: false },
   fornecedor_id: { type: DataTypes.INTEGER },
   fornecedor_nome: { type: DataTypes.STRING(200), allowNull: false },
-  email: { type: DataTypes.STRING(200) },
   estado: { type: DataTypes.STRING(20), defaultValue: "enviado" },
   observacoes: { type: DataTypes.TEXT },
   solicitado_por: { type: DataTypes.STRING(200) },

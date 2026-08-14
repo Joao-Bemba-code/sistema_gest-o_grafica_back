@@ -1,4 +1,4 @@
-const { Organizacao, Sistema, Seguranca, ConfiguracaoEmail, Usuario } = require("../models");
+const { Organizacao, Sistema, Seguranca, Usuario } = require("../models");
 
 exports.buscarOrganizacao = async (req, res) => {
   try {
@@ -71,40 +71,6 @@ exports.guardarSeguranca = async (req, res) => {
     return res.json(seguranca);
   } catch (e) {
     return res.status(500).json({ erro: "Erro ao guardar configurações de segurança" });
-  }
-};
-
-exports.buscarEmail = async (req, res) => {
-  try {
-    let cfg = await ConfiguracaoEmail.findOne({ where: { organizacao_id: req.organizacao_id } });
-    if (!cfg) {
-      cfg = await ConfiguracaoEmail.create({ organizacao_id: req.organizacao_id });
-    }
-    return res.json(cfg);
-  } catch (e) {
-    return res.status(500).json({ erro: "Erro ao buscar configurações de email" });
-  }
-};
-
-exports.guardarEmail = async (req, res) => {
-  try {
-    const { ativo, smtp_host, smtp_port, smtp_user, smtp_senha, email_remetente, email_nome } = req.body;
-    let cfg = await ConfiguracaoEmail.findOne({ where: { organizacao_id: req.organizacao_id } });
-    if (!cfg) {
-      cfg = await ConfiguracaoEmail.create({ organizacao_id: req.organizacao_id });
-    }
-    await cfg.update({
-      ativo: !!ativo,
-      smtp_host: smtp_host || null,
-      smtp_port: Number(smtp_port) || 587,
-      smtp_user: smtp_user || null,
-      smtp_senha: smtp_senha || null,
-      email_remetente: email_remetente || null,
-      email_nome: email_nome || null,
-    });
-    return res.json(cfg);
-  } catch (e) {
-    return res.status(500).json({ erro: "Erro ao guardar configurações de email" });
   }
 };
 

@@ -19,7 +19,6 @@ async function aplicarMigracoesMysql(sequelize) {
   await adicionar("orcamento", "especificacao_json", "JSON NULL");
   await adicionar("orcamento_item", "composto", "TINYINT(1) NOT NULL DEFAULT 0");
   await adicionar("orcamento_item", "margem", "DECIMAL(12,2) NOT NULL DEFAULT 0");
-  await adicionar("pedido", "email", "VARCHAR(200) NULL");
 }
 
 module.exports = { aplicarMigracoesMysql };

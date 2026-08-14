@@ -1,77 +1,5 @@
-const { sequelize, Pedido, PedidoItem, Material, MovimentoEstoque, Sequencia, Cliente, ConfiguracaoEmail, Organizacao } = require("../models");
+const { sequelize, Pedido, PedidoItem, Material, MovimentoEstoque, Sequencia } = require("../models");
 const { Transaction } = require("sequelize");
-const { enviarEmail } = require("../services/email");
-
-function formatarKz(v) {
-  return `Kz ${Number(v || 0).toLocaleString("pt-AO", { maximumFractionDigits: 2 })}`;
-}
-
-function linhaHtml(p) {
-  const itens = (p.pedido_items || [])
-    .map(
-      (i) =>
-        `<tr>
-          <td style="padding:6px 8px;border:1px solid #ddd;">${i.material_codigo || "—"}</td>
-          <td style="padding:6px 8px;border:1px solid #ddd;">${i.material_nome || "—"}</td>
-          <td style="padding:6px 8px;border:1px solid #ddd;text-align:center;">${i.unidade || "un"}</td>
-          <td style="padding:6px 8px;border:1px solid #ddd;text-align:right;">${Number(i.quantidade) || 0}</td>
-          <td style="padding:6px 8px;border:1px solid #ddd;text-align:right;">${formatarKz(i.preco_unit)}</td>
-          <td style="padding:6px 8px;border:1px solid #ddd;text-align:right;">${formatarKz(i.total)}</td>
-        </tr>`
-    )
-    .join("");
-  const total = (p.pedido_items || []).reduce((s, i) => s + (Number(i.total) || 0), 0);
-  const data = p.data_pedido ? new Date(p.data_pedido).toLocaleDateString("pt-PT") : "—";
-  return `
-    <div style="font-family:Arial,Helvetica,sans-serif;color:#212529;">
-      <h2 style="color:#0f766e;">Pedido de Compra ${p.numero}</h2>
-      <p>Fornecedor: <strong>${p.fornecedor_nome || "—"}</strong></p>
-      <p>Data do pedido: ${data}${p.solicitado_por ? ` • Solicitado por: ${p.solicitado_por}` : ""}</p>
-      <table style="border-collapse:collapse;width:100%;font-size:13px;margin-top:10px;">
-        <thead>
-          <tr style="background:#0f766e;color:#fff;">
-            <th style="padding:6px 8px;border:1px solid #ddd;">Código</th>
-            <th style="padding:6px 8px;border:1px solid #ddd;">Material</th>
-            <th style="padding:6px 8px;border:1px solid #ddd;">Unid.</th>
-            <th style="padding:6px 8px;border:1px solid #ddd;">Qtd</th>
-            <th style="padding:6px 8px;border:1px solid #ddd;">Preço Unit.</th>
-            <th style="padding:6px 8px;border:1px solid #ddd;">Total</th>
-          </tr>
-        </thead>
-        <tbody>${itens}</tbody>
-        <tfoot>
-          <tr>
-            <td colspan="5" style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-weight:bold;">Total</td>
-            <td style="padding:6px 8px;border:1px solid #ddd;text-align:right;font-weight:bold;">${formatarKz(total)}</td>
-          </tr>
-        </tfoot>
-      </table>
-      ${p.observacoes ? `<p style="margin-top:12px;">Observações: <em>${p.observacoes}</em></p>` : ""}
-      <p style="margin-top:20px;color:#6c757d;font-size:12px;">Documento gerado pelo SIGRAF — anexo em PDF.</p>
-    </div>`;
-}
-
-async function resolverEmailFornecedor(pedido, organizacao_id) {
-  if (pedido.fornecedor_id) {
-    const cli = await Cliente.findOne({
-      where: { id: pedido.fornecedor_id, organizacao_id },
-      raw: true,
-    });
-    if (cli && cli.email) return cli.email;
-  }
-  if (pedido.fornecedor_nome) {
-    const cli = await Cliente.findOne({
-      where: {
-        organizacao_id,
-        tipo: "fornecedor",
-        nome: String(pedido.fornecedor_nome).trim(),
-      },
-      raw: true,
-    });
-    if (cli && cli.email) return cli.email;
-  }
-  return null;
-}
 
 const ESTADOS = ["enviado", "recebido", "cancelado"];
 
@@ -117,7 +45,6 @@ function serializar(p) {
     numero: p.numero,
     fornecedor_id: p.fornecedor_id,
     fornecedor_nome: p.fornecedor_nome,
-    email: p.email || "",
     estado: p.estado,
     observacoes: p.observacoes,
     solicitado_por: p.solicitado_por,
@@ -188,7 +115,7 @@ exports.buscarPorId = async (req, res) => {
 exports.criar = async (req, res) => {
   const t = await sequelize.transaction();
   try {
-    const { fornecedor_id, fornecedor_nome, email, itens, observacoes, solicitado_por, data_pedido } = req.body;
+    const { fornecedor_id, fornecedor_nome, itens, observacoes, solicitado_por, data_pedido } = req.body;
     if (!fornecedor_nome || !String(fornecedor_nome).trim()) {
       return res.status(422).json({ erro: "Informe o fornecedor do pedido" });
     }
@@ -205,7 +132,6 @@ exports.criar = async (req, res) => {
         organizacao_id: req.organizacao_id,
         fornecedor_id: fornecedor_id || null,
         fornecedor_nome: String(fornecedor_nome).trim(),
-        email: String(email || "").trim() || null,
         estado: "enviado",
         observacoes: observacoes || null,
         solicitado_por: solicitado_por || null,
@@ -226,46 +152,6 @@ exports.criar = async (req, res) => {
     await t.rollback();
     console.error("Erro ao criar pedido:", e);
     return res.status(500).json({ erro: "Erro ao criar pedido" });
-  }
-};
-
-exports.enviarEmail = async (req, res) => {
-  try {
-    const pedido = await Pedido.findOne({
-      where: { id: req.params.id, organizacao_id: req.organizacao_id },
-      include: [{ model: PedidoItem }],
-    });
-    if (!pedido) return res.status(404).json({ erro: "Pedido não encontrado" });
-
-    const para = pedido.email || (await resolverEmailFornecedor(pedido, req.organizacao_id));
-    if (!para) {
-      return res.status(422).json({ erro: "Fornecedor sem email registado — preencha o email no cadastro do fornecedor" });
-    }
-
-    const [config, org] = await Promise.all([
-      ConfiguracaoEmail.findOne({ where: { organizacao_id: req.organizacao_id } }),
-      Organizacao.findByPk(req.organizacao_id),
-    ]);
-
-    const { anexo_base64, anexo_nome } = req.body || {};
-    const nomeAnexo = anexo_nome || `Pedido_${(pedido.numero || "").replace(/[^\w-]+/g, "_")}.pdf`;
-
-    const resultado = await enviarEmail({
-      config,
-      para,
-      assunto: `Pedido de Compra ${pedido.numero} — ${pedido.fornecedor_nome || "Fornecedor"}`,
-      html: linhaHtml(pedido),
-      anexoBase64: anexo_base64,
-      anexoNome: nomeAnexo,
-    });
-
-    if (!resultado.ok) {
-      return res.status(400).json({ erro: resultado.erro });
-    }
-    return res.json({ mensagem: `Pedido ${pedido.numero} enviado por email para ${para}` });
-  } catch (e) {
-    console.error("Erro ao enviar email do pedido:", e);
-    return res.status(500).json({ erro: "Erro ao enviar o email do pedido. Verifique as configurações de SMTP." });
   }
 };
 

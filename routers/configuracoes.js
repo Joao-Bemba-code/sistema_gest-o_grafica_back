@@ -34,9 +34,6 @@ router.put("/sistema", Controller.guardarSistema);
 router.get("/seguranca", Controller.buscarSeguranca);
 router.put("/seguranca", Controller.guardarSeguranca);
 
-router.get("/email", Controller.buscarEmail);
-router.put("/email", Controller.guardarEmail);
-
 router.post("/logo", (req, res) => {
   upload.single("logo")(req, res, (err) => {
     if (err) {
