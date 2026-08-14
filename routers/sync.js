@@ -17,6 +17,8 @@ const {
   ReservaEstoque,
   Faturacao,
   Sequencia,
+  Pedido,
+  PedidoItem,
 } = require("../models");
 
 router.use(auth);
@@ -153,6 +155,28 @@ router.post("/", async (req, res) => {
 
     await mesclarOrg(ReservaEstoque, b.reservas, orgId);
     await mesclarOrg(Faturacao, b.faturacaoes, orgId);
+
+    for (const p of b.pedidos || []) {
+      if (p.id == null) continue;
+      const itens = (b.pedido_itens || []).filter(
+        (i) => Number(i.pedido_id) === Number(p.id)
+      );
+      const remoto = await Pedido.findOne({ where: { id: p.id, organizacao_id: orgId } });
+      const autorizado = !remoto || novo(p) > novo(remoto);
+      if (!remoto) {
+        await Pedido.create(criarValores(p, { organizacao_id: orgId }));
+      } else if (autorizado) {
+        await remoto.update({
+          ...limparDados(p),
+          organizacao_id: orgId,
+          ...(p.updatedAt ? { updatedAt: p.updatedAt } : {}),
+        });
+      }
+      if (autorizado) {
+        await substituirFilhos(PedidoItem, "pedido_id", p.id, itens);
+      }
+    }
+
     await sincronizarSequencia(b.sequencias, orgId);
 
     return res.json({ ok: true, mensagem: "Sincronização concluída" });
@@ -176,6 +200,7 @@ router.get("/", async (req, res) => {
       ordens,
       reservas,
       faturacaoes,
+      pedidos,
       sequencias,
     ] = await Promise.all([
       t(Categoria),
@@ -187,6 +212,7 @@ router.get("/", async (req, res) => {
       t(OrdemProducao),
       t(ReservaEstoque),
       t(Faturacao),
+      t(Pedido),
       t(Sequencia),
     ]);
 
@@ -213,6 +239,11 @@ router.get("/", async (req, res) => {
       ? await Qualidade.findAll({ raw: true, where: { ordem_producao_id: ordemIds } })
       : [];
 
+    const pedidoIds = pedidos.map((p) => p.id);
+    const pedido_itens = pedidoIds.length
+      ? await PedidoItem.findAll({ raw: true, where: { pedido_id: pedidoIds } })
+      : [];
+
     return res.json({
       categorias,
       fornecedores,
@@ -229,6 +260,8 @@ router.get("/", async (req, res) => {
       qualidades,
       reservas,
       faturacaoes,
+      pedidos,
+      pedido_itens,
       sequencias,
     });
   } catch (e) {

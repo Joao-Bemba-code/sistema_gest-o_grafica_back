@@ -19,6 +19,8 @@ const Sistema = require("./Sistema");
 const Seguranca = require("./Seguranca");
 const Fornecedor = require("./Fornecedor");
 const Sequencia = require("./Sequencia");
+const Pedido = require("./Pedido");
+const PedidoItem = require("./PedidoItem");
 
 Organizacao.hasMany(Usuario, { foreignKey: "organizacao_id" });
 Usuario.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
@@ -105,6 +107,13 @@ Seguranca.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
 Organizacao.hasOne(Sequencia, { foreignKey: "organizacao_id" });
 Sequencia.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
 
+Organizacao.hasMany(Pedido, { foreignKey: "organizacao_id" });
+Pedido.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
+Pedido.hasMany(PedidoItem, { foreignKey: "pedido_id" });
+PedidoItem.belongsTo(Pedido, { foreignKey: "pedido_id" });
+Material.hasMany(PedidoItem, { foreignKey: "material_id" });
+PedidoItem.belongsTo(Material, { foreignKey: "material_id" });
+
 module.exports = {
   sequelize,
   Organizacao,
@@ -127,4 +136,6 @@ module.exports = {
   Sistema,
   Seguranca,
   Sequencia,
+  Pedido,
+  PedidoItem,
 };
