@@ -1,6 +1,7 @@
 const router = require("express").Router();
 const auth = require("../protect/auth");
 const {
+  sequelize,
   Categoria,
   Fornecedor,
   Cliente,
@@ -47,77 +48,109 @@ function criarValores(r, extras) {
   };
 }
 
-async function mesclarOrg(Model, registos, orgId) {
+async function mesclarOrg(Model, registos, orgId, t) {
   for (const r of registos || []) {
     if (!r || r.id == null) continue;
-    const existe = await Model.findOne({ where: { id: r.id, organizacao_id: orgId } });
+    const existe = await Model.findOne({
+      where: { id: r.id, organizacao_id: orgId },
+      transaction: t,
+    });
     if (!existe) {
-      await Model.create(criarValores(r, { organizacao_id: orgId }));
+      await Model.create(criarValores(r, { organizacao_id: orgId }), { transaction: t });
     } else if (novo(r) > novo(existe)) {
-      await existe.update({
-        ...limparDados(r),
-        organizacao_id: orgId,
-        ...(r.updatedAt ? { updatedAt: r.updatedAt } : {}),
-      });
+      await existe.update(
+        {
+          ...limparDados(r),
+          organizacao_id: orgId,
+          ...(r.updatedAt ? { updatedAt: r.updatedAt } : {}),
+        },
+        { transaction: t }
+      );
     }
   }
 }
 
-async function substituirFilhos(Model, fk, fkVal, registos, extras) {
-  const existentes = await Model.findAll({ where: { [fk]: fkVal }, attributes: ["id"] });
+async function substituirFilhos(Model, fk, fkVal, registos, extras, t) {
+  const existentes = await Model.findAll({
+    where: { [fk]: fkVal },
+    attributes: ["id"],
+    transaction: t,
+  });
   const ids = existentes.map((x) => x.id);
-  if (ids.length) await Model.destroy({ where: { id: ids } });
+  if (ids.length) await Model.destroy({ where: { id: ids }, transaction: t });
   for (const r of registos || []) {
     if (!r || r.id == null) continue;
-    await Model.create(criarValores(r, { ...(extras || {}), [fk]: fkVal }));
+    await Model.create(criarValores(r, { ...(extras || {}), [fk]: fkVal }), {
+      transaction: t,
+    });
   }
 }
 
-async function sincronizarSequencia(registos, orgId) {
+async function sincronizarSequencia(registos, orgId, t) {
   const r = (registos || [])[0];
   if (!r) return;
   const [seq] = await Sequencia.findOrCreate({
     where: { organizacao_id: orgId },
     defaults: { numero: 0 },
+    transaction: t,
   });
   const novoNum = Math.max(Number(seq.numero) || 0, Number(r.numero) || 0);
-  if (novoNum > Number(seq.numero) || 0) await seq.update({ numero: novoNum });
+  if (novoNum > Number(seq.numero) || 0) await seq.update({ numero: novoNum }, { transaction: t });
 }
 
 router.post("/", async (req, res) => {
   const orgId = req.organizacao_id;
   const b = req.body || {};
+  const t = await sequelize.transaction();
   try {
-    await mesclarOrg(Categoria, b.categorias, orgId);
-    await mesclarOrg(Fornecedor, b.fornecedores, orgId);
-    await mesclarOrg(Cliente, b.clientes, orgId);
-    await mesclarOrg(Material, b.materiais, orgId);
-    await mesclarOrg(MovimentoEstoque, b.movimentos, orgId);
+    await mesclarOrg(Categoria, b.categorias, orgId, t);
+    await mesclarOrg(Fornecedor, b.fornecedores, orgId, t);
+    await mesclarOrg(Cliente, b.clientes, orgId, t);
+    await mesclarOrg(Material, b.materiais, orgId, t);
+    await mesclarOrg(MovimentoEstoque, b.movimentos, orgId, t);
 
     for (const o of b.orcamentos || []) {
       if (o.id == null) continue;
       const itens = (b.orcamento_itens || []).filter(
         (i) => Number(i.orcamento_id) === Number(o.id)
       );
-      const remoto = await Orcamento.findOne({ where: { id: o.id, organizacao_id: orgId } });
-      const autorizado = !remoto || novo(o) > novo(remoto);
+      const remoto = await Orcamento.findOne({
+        where: { id: o.id, organizacao_id: orgId },
+        transaction: t,
+      });
+      const autorizado = !remoto || novo(o) >= novo(remoto);
       if (!remoto) {
-        await Orcamento.create(criarValores(o, { organizacao_id: orgId }));
+        await Orcamento.create(criarValores(o, { organizacao_id: orgId }), { transaction: t });
       } else if (autorizado) {
-        await remoto.update({
-          ...limparDados(o),
-          organizacao_id: orgId,
-          ...(o.updatedAt ? { updatedAt: o.updatedAt } : {}),
-        });
+        await remoto.update(
+          {
+            ...limparDados(o),
+            organizacao_id: orgId,
+            ...(o.updatedAt ? { updatedAt: o.updatedAt } : {}),
+          },
+          { transaction: t }
+        );
       }
       if (autorizado) {
-        await substituirFilhos(OrcamentoItem, "orcamento_id", o.id, itens);
+        const existentes = await OrcamentoItem.findAll({
+          where: { orcamento_id: o.id },
+          attributes: ["id"],
+          transaction: t,
+        });
+        const idsExistentes = existentes.map((x) => x.id);
+        if (idsExistentes.length) {
+          await OrcamentoMaterial.destroy({
+            where: { orcamento_item_id: idsExistentes },
+            transaction: t,
+          });
+        }
+        await substituirFilhos(OrcamentoItem, "orcamento_id", o.id, itens, null, t);
         for (const item of itens) {
           if (item.id == null) continue;
           const materiais = (b.orcamento_materiais || []).filter(
             (m) => Number(m.orcamento_item_id) === Number(item.id)
           );
-          await substituirFilhos(OrcamentoMaterial, "orcamento_item_id", item.id, materiais);
+          await substituirFilhos(OrcamentoMaterial, "orcamento_item_id", item.id, materiais, null, t);
         }
       }
     }
@@ -130,16 +163,24 @@ router.post("/", async (req, res) => {
         [Acabamento, "acabamentos"],
         [Qualidade, "qualidades"],
       ];
-      const remoto = await OrdemProducao.findOne({ where: { id: od.id, organizacao_id: orgId } });
-      const autorizado = !remoto || novo(od) > novo(remoto);
+      const remoto = await OrdemProducao.findOne({
+        where: { id: od.id, organizacao_id: orgId },
+        transaction: t,
+      });
+      const autorizado = !remoto || novo(od) >= novo(remoto);
       if (!remoto) {
-        await OrdemProducao.create(criarValores(od, { organizacao_id: orgId }));
-      } else if (autorizado) {
-        await remoto.update({
-          ...limparDados(od),
-          organizacao_id: orgId,
-          ...(od.updatedAt ? { updatedAt: od.updatedAt } : {}),
+        await OrdemProducao.create(criarValores(od, { organizacao_id: orgId }), {
+          transaction: t,
         });
+      } else if (autorizado) {
+        await remoto.update(
+          {
+            ...limparDados(od),
+            organizacao_id: orgId,
+            ...(od.updatedAt ? { updatedAt: od.updatedAt } : {}),
+          },
+          { transaction: t }
+        );
       }
       if (autorizado) {
         for (const [Model, campo] of filhosOrdem) {
@@ -148,39 +189,47 @@ router.post("/", async (req, res) => {
           );
           await substituirFilhos(Model, "ordem_producao_id", od.id, registos, {
             organizacao_id: orgId,
-          });
+          }, t);
         }
       }
     }
 
-    await mesclarOrg(ReservaEstoque, b.reservas, orgId);
-    await mesclarOrg(Faturacao, b.faturacaoes, orgId);
+    await mesclarOrg(ReservaEstoque, b.reservas, orgId, t);
+    await mesclarOrg(Faturacao, b.faturacaoes, orgId, t);
 
     for (const p of b.pedidos || []) {
       if (p.id == null) continue;
       const itens = (b.pedido_itens || []).filter(
         (i) => Number(i.pedido_id) === Number(p.id)
       );
-      const remoto = await Pedido.findOne({ where: { id: p.id, organizacao_id: orgId } });
-      const autorizado = !remoto || novo(p) > novo(remoto);
+      const remoto = await Pedido.findOne({
+        where: { id: p.id, organizacao_id: orgId },
+        transaction: t,
+      });
+      const autorizado = !remoto || novo(p) >= novo(remoto);
       if (!remoto) {
-        await Pedido.create(criarValores(p, { organizacao_id: orgId }));
+        await Pedido.create(criarValores(p, { organizacao_id: orgId }), { transaction: t });
       } else if (autorizado) {
-        await remoto.update({
-          ...limparDados(p),
-          organizacao_id: orgId,
-          ...(p.updatedAt ? { updatedAt: p.updatedAt } : {}),
-        });
+        await remoto.update(
+          {
+            ...limparDados(p),
+            organizacao_id: orgId,
+            ...(p.updatedAt ? { updatedAt: p.updatedAt } : {}),
+          },
+          { transaction: t }
+        );
       }
       if (autorizado) {
-        await substituirFilhos(PedidoItem, "pedido_id", p.id, itens);
+        await substituirFilhos(PedidoItem, "pedido_id", p.id, itens, null, t);
       }
     }
 
-    await sincronizarSequencia(b.sequencias, orgId);
+    await sincronizarSequencia(b.sequencias, orgId, t);
 
+    await t.commit();
     return res.json({ ok: true, mensagem: "Sincronização concluída" });
   } catch (e) {
+    await t.rollback();
     console.error("Erro na sincronização:", e);
     return res.status(500).json({ erro: "Erro na sincronização: " + (e.message || e) });
   }
