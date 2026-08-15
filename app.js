@@ -23,7 +23,7 @@ function criarApp(opcoes = {}) {
     app.use("/api", proxy(opcoes.proxyUrl));
     app.use("/uploads", proxy(opcoes.proxyUrl));
   } else {
-    app.use(express.json({ limit: "10mb" }));
+    app.use(express.json({ limit: "100mb" }));
     app.use("/uploads", express.static(UPLOADS));
     app.use("/api/auth", require("./routers/auth"));
     app.use("/api/clientes", require("./routers/clientes"));
