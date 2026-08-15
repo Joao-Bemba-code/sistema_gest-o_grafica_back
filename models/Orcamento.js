@@ -23,6 +23,10 @@ const Orcamento = sequelize.define("orcamento", {
   total_com_iva: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
   observacoes: { type: DataTypes.TEXT },
   usuario_id: { type: DataTypes.INTEGER },
+  deleted: { type: DataTypes.BOOLEAN, defaultValue: false },
+  deletedAt: { type: DataTypes.DATE, allowNull: true },
+}, {
+  defaultScope: { where: { deleted: false } },
 });
 
 module.exports = Orcamento;

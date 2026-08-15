@@ -231,8 +231,8 @@ exports.atualizar = async (req, res) => {
     await orcamento.update(dados);
     if (req.body.itens) {
       const idsItens = (await OrcamentoItem.findAll({ where: { orcamento_id: orcamento.id }, attributes: ["id"] })).map((i) => i.id);
-      if (idsItens.length) await OrcamentoMaterial.destroy({ where: { orcamento_item_id: idsItens } });
-      await OrcamentoItem.destroy({ where: { orcamento_id: orcamento.id } });
+      if (idsItens.length) await OrcamentoMaterial.update({ deleted: 1, deletedAt: new Date() }, { where: { orcamento_item_id: idsItens } });
+      await OrcamentoItem.update({ deleted: 1, deletedAt: new Date() }, { where: { orcamento_id: orcamento.id } });
       const items = normalizarItens(req.body.itens);
       if (items.length) {
         const criados = await OrcamentoItem.bulkCreate(items.map((i) => ({ ...i, orcamento_id: orcamento.id })));
@@ -261,9 +261,9 @@ exports.remover = async (req, res) => {
     });
     if (!orcamento) return res.status(404).json({ erro: "Orçamento não encontrado" });
     const idsItens = (await OrcamentoItem.findAll({ where: { orcamento_id: orcamento.id }, attributes: ["id"] })).map((i) => i.id);
-    if (idsItens.length) await OrcamentoMaterial.destroy({ where: { orcamento_item_id: idsItens } });
-    await OrcamentoItem.destroy({ where: { orcamento_id: orcamento.id } });
-    await orcamento.destroy();
+    if (idsItens.length) await OrcamentoMaterial.update({ deleted: 1, deletedAt: new Date() }, { where: { orcamento_item_id: idsItens } });
+    await OrcamentoItem.update({ deleted: 1, deletedAt: new Date() }, { where: { orcamento_id: orcamento.id } });
+    await orcamento.update({ deleted: 1, deletedAt: new Date() });
     return res.json({ mensagem: "Orçamento removido com sucesso" });
   } catch (e) {
     console.error("Erro ao remover orçamento:", e);

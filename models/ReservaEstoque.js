@@ -14,6 +14,10 @@ const ReservaEstoque = sequelize.define("reserva_estoque", {
   },
   lote: { type: DataTypes.STRING(100) },
   usuario_id: { type: DataTypes.INTEGER },
+  deleted: { type: DataTypes.BOOLEAN, defaultValue: false },
+  deletedAt: { type: DataTypes.DATE, allowNull: true },
+}, {
+  defaultScope: { where: { deleted: false } },
 });
 
 module.exports = ReservaEstoque;

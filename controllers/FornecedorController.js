@@ -28,7 +28,7 @@ exports.remover = async (req, res) => {
       where: { id: req.params.id, organizacao_id: req.organizacao_id },
     });
     if (!fornecedor) return res.status(404).json({ erro: "Fornecedor nao encontrado" });
-    await fornecedor.destroy();
+    await fornecedor.update({ deleted: 1, deletedAt: new Date() });
     return res.json({ mensagem: "Fornecedor removido com sucesso" });
   } catch (e) {
     return res.status(500).json({ erro: "Erro ao remover fornecedor" });

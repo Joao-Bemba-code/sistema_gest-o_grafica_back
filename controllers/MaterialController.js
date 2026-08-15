@@ -120,8 +120,8 @@ exports.remover = async (req, res) => {
       where: { id: req.params.id, organizacao_id: req.organizacao_id },
     });
     if (!material) return res.status(404).json({ erro: "Material não encontrado" });
-    await MovimentoEstoque.destroy({ where: { material_id: material.id } });
-    await material.destroy();
+    await MovimentoEstoque.update({ deleted: 1, deletedAt: new Date() }, { where: { material_id: material.id } });
+    await material.update({ deleted: 1, deletedAt: new Date() });
     return res.json({ mensagem: "Material removido com sucesso" });
   } catch (e) {
     console.error("Erro ao remover material:", e);

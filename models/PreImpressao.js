@@ -17,6 +17,10 @@ const PreImpressao = sequelize.define("pre_impressao", {
   resultado: { type: DataTypes.ENUM("aprovado", "reprovado", "pendente"), defaultValue: "pendente" },
   observacoes: { type: DataTypes.TEXT },
   usuario_id: { type: DataTypes.INTEGER },
+  deleted: { type: DataTypes.BOOLEAN, defaultValue: false },
+  deletedAt: { type: DataTypes.DATE, allowNull: true },
+}, {
+  defaultScope: { where: { deleted: false } },
 });
 
 module.exports = PreImpressao;

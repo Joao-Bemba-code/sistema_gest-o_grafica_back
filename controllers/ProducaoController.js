@@ -269,7 +269,7 @@ exports.removerOrdem = async (req, res) => {
       ordemProducaoId: ordem.id,
       transaction: t,
     });
-    await ordem.destroy({ transaction: t });
+    await ordem.update({ deleted: 1, deletedAt: new Date() }, { transaction: t });
     await t.commit();
     return res.json({ mensagem: "Ordem removida com sucesso" });
   } catch (e) {
@@ -363,7 +363,7 @@ exports.salvarAcabamento = async (req, res) => {
         .map(([servico, estado]) => ({ servico, estado: estado || "pendente" }));
     }
     if (servicos && servicos.length) {
-      await Acabamento.destroy({ where: { ordem_producao_id, organizacao_id: req.organizacao_id } });
+      await Acabamento.update({ deleted: 1, deletedAt: new Date() }, { where: { ordem_producao_id, organizacao_id: req.organizacao_id } });
       const items = servicos.map((s) => ({
         organizacao_id: req.organizacao_id,
         ordem_producao_id: parseInt(ordem_producao_id, 10),

@@ -33,6 +33,10 @@ const Material = sequelize.define("material", {
   custo_unit: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
   margem: { type: DataTypes.DECIMAL(5, 2), defaultValue: 0 },
   ativo: { type: DataTypes.BOOLEAN, defaultValue: true },
+  deleted: { type: DataTypes.BOOLEAN, defaultValue: false },
+  deletedAt: { type: DataTypes.DATE, allowNull: true },
+}, {
+  defaultScope: { where: { deleted: false } },
 });
 
 module.exports = Material;

@@ -28,7 +28,7 @@ exports.remover = async (req, res) => {
       where: { id: req.params.id, organizacao_id: req.organizacao_id },
     });
     if (!categoria) return res.status(404).json({ erro: "Categoria não encontrada" });
-    await categoria.destroy();
+    await categoria.update({ deleted: 1, deletedAt: new Date() });
     return res.json({ mensagem: "Categoria removida com sucesso" });
   } catch (e) {
     return res.status(500).json({ erro: "Erro ao remover categoria" });

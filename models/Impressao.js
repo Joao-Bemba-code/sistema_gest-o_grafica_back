@@ -14,6 +14,10 @@ const Impressao = sequelize.define("impressao", {
   taxa_rejeicao: { type: DataTypes.DECIMAL(5, 2), defaultValue: 0 },
   observacoes: { type: DataTypes.TEXT },
   usuario_id: { type: DataTypes.INTEGER },
+  deleted: { type: DataTypes.BOOLEAN, defaultValue: false },
+  deletedAt: { type: DataTypes.DATE, allowNull: true },
+}, {
+  defaultScope: { where: { deleted: false } },
 });
 
 module.exports = Impressao;

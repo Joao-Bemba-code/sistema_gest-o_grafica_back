@@ -10,6 +10,10 @@ const OrcamentoItem = sequelize.define("orcamento_item", {
   total: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
   composto: { type: DataTypes.BOOLEAN, defaultValue: false },
   margem: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
+  deleted: { type: DataTypes.BOOLEAN, defaultValue: false },
+  deletedAt: { type: DataTypes.DATE, allowNull: true },
+}, {
+  defaultScope: { where: { deleted: false } },
 });
 
 module.exports = OrcamentoItem;

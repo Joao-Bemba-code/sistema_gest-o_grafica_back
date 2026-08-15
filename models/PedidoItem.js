@@ -12,6 +12,10 @@ const PedidoItem = sequelize.define("pedido_item", {
   preco_unit: { type: DataTypes.DECIMAL(14, 2), defaultValue: 0 },
   total: { type: DataTypes.DECIMAL(14, 2), defaultValue: 0 },
   quantidade_recebida: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
+  deleted: { type: DataTypes.BOOLEAN, defaultValue: false },
+  deletedAt: { type: DataTypes.DATE, allowNull: true },
+}, {
+  defaultScope: { where: { deleted: false } },
 });
 
 module.exports = PedidoItem;

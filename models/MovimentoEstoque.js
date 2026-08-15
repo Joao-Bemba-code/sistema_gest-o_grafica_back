@@ -22,6 +22,10 @@ const MovimentoEstoque = sequelize.define("movimento_estoque", {
   solicitado_por: { type: DataTypes.STRING(200) },
   permitido_por: { type: DataTypes.STRING(200) },
   usuario_id: { type: DataTypes.INTEGER },
+  deleted: { type: DataTypes.BOOLEAN, defaultValue: false },
+  deletedAt: { type: DataTypes.DATE, allowNull: true },
+}, {
+  defaultScope: { where: { deleted: false } },
 });
 
 module.exports = MovimentoEstoque;

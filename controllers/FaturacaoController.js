@@ -261,7 +261,7 @@ exports.remover = async (req, res) => {
       where: { id: req.params.id, organizacao_id: req.organizacao_id },
     });
     if (!fatura) return res.status(404).json({ erro: "Fatura não encontrada" });
-    await fatura.destroy();
+    await fatura.update({ deleted: 1, deletedAt: new Date() });
     return res.json({ mensagem: "Fatura removida com sucesso" });
   } catch (e) {
     console.error("Erro ao remover fatura:", e);

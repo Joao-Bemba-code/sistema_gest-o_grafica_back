@@ -20,6 +20,32 @@ async function aplicarMigracoesMysql(sequelize) {
   await adicionar("orcamento_item", "composto", "TINYINT(1) NOT NULL DEFAULT 0");
   await adicionar("orcamento_item", "margem", "DECIMAL(12,2) NOT NULL DEFAULT 0");
 
+  // Tombstones (soft-delete) para a sincronização de eliminações entre
+  // computadores: as tabelas reais sincronizáveis ganham deleted/deletedAt.
+  const tabelasTomb = [
+    "cliente",
+    "fornecedor",
+    "categoria",
+    "material",
+    "movimento_estoque",
+    "orcamento",
+    "orcamento_item",
+    "orcamento_material",
+    "ordem_producao",
+    "pre_impressao",
+    "impressao",
+    "acabamento",
+    "qualidade",
+    "reserva_estoque",
+    "faturacao",
+    "pedido",
+    "pedido_item",
+  ];
+  for (const t of tabelasTomb) {
+    await adicionar(t, "deleted", "TINYINT(1) NOT NULL DEFAULT 0");
+    await adicionar(t, "deletedAt", "DATETIME NULL");
+  }
+
   const refs = await sequelize.query(
     `SELECT COLUMN_TYPE FROM information_schema.COLUMNS
      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'movimento_estoque' AND COLUMN_NAME = 'referencia_tipo'`,

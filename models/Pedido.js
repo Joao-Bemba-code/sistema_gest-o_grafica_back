@@ -14,6 +14,10 @@ const Pedido = sequelize.define("pedido", {
   data_recebimento: { type: DataTypes.DATE },
   total: { type: DataTypes.DECIMAL(14, 2), defaultValue: 0 },
   usuario_id: { type: DataTypes.INTEGER },
+  deleted: { type: DataTypes.BOOLEAN, defaultValue: false },
+  deletedAt: { type: DataTypes.DATE, allowNull: true },
+}, {
+  defaultScope: { where: { deleted: false } },
 });
 
 module.exports = Pedido;

@@ -99,7 +99,7 @@ exports.remover = async (req, res) => {
       where: { id: req.params.id, organizacao_id: req.organizacao_id },
     });
     if (!cliente) return res.status(404).json({ erro: "Cliente não encontrado" });
-    await cliente.destroy();
+    await cliente.update({ deleted: 1, deletedAt: new Date() });
     return res.json({ mensagem: "Cliente removido com sucesso" });
   } catch (e) {
     return res.status(500).json({ erro: "Erro ao remover cliente" });

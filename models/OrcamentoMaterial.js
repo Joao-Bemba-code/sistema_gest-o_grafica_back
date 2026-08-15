@@ -11,6 +11,10 @@ const OrcamentoMaterial = sequelize.define("orcamento_material", {
   custo_unit: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
   custo_total: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
   mover_estoque: { type: DataTypes.BOOLEAN, defaultValue: false },
+  deleted: { type: DataTypes.BOOLEAN, defaultValue: false },
+  deletedAt: { type: DataTypes.DATE, allowNull: true },
+}, {
+  defaultScope: { where: { deleted: false } },
 });
 
 module.exports = OrcamentoMaterial;

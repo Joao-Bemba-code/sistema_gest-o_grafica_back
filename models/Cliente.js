@@ -16,6 +16,10 @@ const Cliente = sequelize.define("cliente", {
   data_cadastro: { type: DataTypes.DATEONLY },
   observacoes: { type: DataTypes.TEXT },
   ativo: { type: DataTypes.BOOLEAN, defaultValue: true },
+  deleted: { type: DataTypes.BOOLEAN, defaultValue: false },
+  deletedAt: { type: DataTypes.DATE, allowNull: true },
+}, {
+  defaultScope: { where: { deleted: false } },
 });
 
 module.exports = Cliente;

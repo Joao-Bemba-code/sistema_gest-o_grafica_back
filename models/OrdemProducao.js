@@ -27,6 +27,10 @@ const OrdemProducao = sequelize.define("ordem_producao", {
   entrega_ok: { type: DataTypes.BOOLEAN, defaultValue: false },
   observacoes: { type: DataTypes.TEXT },
   usuario_id: { type: DataTypes.INTEGER },
+  deleted: { type: DataTypes.BOOLEAN, defaultValue: false },
+  deletedAt: { type: DataTypes.DATE, allowNull: true },
+}, {
+  defaultScope: { where: { deleted: false } },
 });
 
 module.exports = OrdemProducao;
