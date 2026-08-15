@@ -8,7 +8,7 @@ const MovimentoEstoque = sequelize.define("movimento_estoque", {
   tipo: { type: DataTypes.ENUM("entrada", "saida"), allowNull: false },
   quantidade: { type: DataTypes.DECIMAL(12, 2), allowNull: false },
   referencia_tipo: {
-    type: DataTypes.ENUM("manual", "op", "ajuste", "nf_e", "reserva", "devolucao"),
+    type: DataTypes.ENUM("manual", "op", "ajuste", "nf_e", "reserva", "devolucao", "pedido"),
     defaultValue: "manual",
   },
   referencia_id: { type: DataTypes.INTEGER },

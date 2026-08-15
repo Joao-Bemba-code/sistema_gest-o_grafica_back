@@ -19,6 +19,19 @@ async function aplicarMigracoesMysql(sequelize) {
   await adicionar("orcamento", "especificacao_json", "JSON NULL");
   await adicionar("orcamento_item", "composto", "TINYINT(1) NOT NULL DEFAULT 0");
   await adicionar("orcamento_item", "margem", "DECIMAL(12,2) NOT NULL DEFAULT 0");
+
+  const refs = await sequelize.query(
+    `SELECT COLUMN_TYPE FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'movimento_estoque' AND COLUMN_NAME = 'referencia_tipo'`,
+    { type: sequelize.QueryTypes.SELECT }
+  );
+  if (refs.length && !refs[0].COLUMN_TYPE.includes("pedido")) {
+    await sequelize.query(
+      `ALTER TABLE \`movimento_estoque\` MODIFY \`referencia_tipo\`
+       ENUM('manual','op','ajuste','nf_e','reserva','devolucao','pedido') NOT NULL DEFAULT 'manual'`
+    );
+    console.log("MIGRAÇÃO: movimento_estoque.referencia_tipo inclui 'pedido'");
+  }
 }
 
 module.exports = { aplicarMigracoesMysql };
