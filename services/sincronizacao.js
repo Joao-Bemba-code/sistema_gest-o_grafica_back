@@ -182,6 +182,7 @@ async function upsertReal(tabela, orgId, registos) {
     const atual = await Model.findByPk(reg.id, { raw: true });
     if (!atual) {
       valores.id = reg.id;
+      valores.createdAt = reg.createdAt ? new Date(Date.parse(reg.createdAt) || Date.now()) : new Date();
       const chaves = Object.keys(valores);
       await sequelize.query(
         `INSERT INTO \`${Model.tableName}\` (\`${chaves.join("`, `")}\`) VALUES (${chaves.map(() => "?").join(", ")})`,
