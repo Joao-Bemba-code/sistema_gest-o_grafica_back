@@ -18,6 +18,16 @@ function criarApp(opcoes = {}) {
     next();
   });
 
+  // Rota pública para testar se o servidor está a funcionar (deploy/health check).
+  app.get("/", (req, res) => {
+    res.json({
+      ok: true,
+      servico: "sistema-gest-o-grafica-back",
+      versao: "1.0.0",
+      hora: new Date().toISOString(),
+    });
+  });
+
   if (opcoes.proxyUrl) {
     const proxy = require("./proxy");
     app.use("/api", proxy(opcoes.proxyUrl));
@@ -37,6 +47,8 @@ function criarApp(opcoes = {}) {
     app.use("/api/pedidos", require("./routers/pedidos"));
     app.use("/api/backup", require("./routers/backup"));
     app.use("/api/sync", require("./routers/sync"));
+    app.use("/api/sinc", require("./routers/sincronizacao"));
+    app.get("/api/health", (req, res) => res.json({ ok: true, hora: new Date().toISOString() }));
   }
 
   return app;

@@ -19,6 +19,8 @@ sequelize
       const { aplicarMigracoesMysql } = require("./migrarMysql");
       await aplicarMigracoesMysql(sequelize);
     }
+    const { inicializarSincronizacao } = require("./services/sincronizacao");
+    await inicializarSincronizacao();
     app.listen(PORTA, () => {
       console.log(`Servidor rodando na porta ${PORTA}`);
     });
