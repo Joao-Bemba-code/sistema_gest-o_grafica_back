@@ -1,6 +1,7 @@
 const { DataTypes, Op } = require("sequelize");
 const sequelize = require("../config");
-const { Organizacao } = require("../models");
+const modelosReais = require("../models");
+const { Organizacao } = modelosReais;
 
 // Tabelas sincronizaveis no servidor (MySQL) e respetivas colunas de negocio.
 // Convencao partilhada com o local:
@@ -128,6 +129,108 @@ async function organizacaoAtual(orgId) {
   return { ...org.toJSON(), updated_at: org.updatedAt };
 }
 
+// ---------------------------------------------------------------------------
+// Sincronização das TABELAS REAIS por ID numérico + Last-Write-Wins.
+// Cada computador usa uma faixa de IDs própria (seed local), por isso os
+// novos registos não colidem entre PCs nem com os IDs existentes na nuvem.
+// As tabelas reais usam organizacao_id (não org_id) e não têm is_dirty.
+// ---------------------------------------------------------------------------
+const TABELAS_SINC = {
+  cliente: "Cliente",
+  fornecedor: "Fornecedor",
+  categoria: "Categoria",
+  material: "Material",
+  movimento_estoque: "MovimentoEstoque",
+  orcamento: "Orcamento",
+  orcamento_item: "OrcamentoItem",
+  orcamento_material: "OrcamentoMaterial",
+  ordem_producao: "OrdemProducao",
+  pre_impressao: "PreImpressao",
+  impressao: "Impressao",
+  acabamento: "Acabamento",
+  qualidade: "Qualidade",
+  reserva_estoque: "ReservaEstoque",
+  faturacao: "Faturacao",
+  pedido: "Pedido",
+  pedido_item: "PedidoItem",
+};
+
+function colunasReais(Model) {
+  return Object.keys(Model.rawAttributes).filter(
+    (a) => !["id", "createdAt", "updatedAt", "is_dirty"].includes(a)
+  );
+}
+
+async function upsertReal(tabela, orgId, registos) {
+  const Model = modelosReais[TABELAS_SINC[tabela]];
+  if (!Model) throw new Error("Tabela não suportada: " + tabela);
+  const colunas = colunasReais(Model);
+  const temOrg = colunas.includes("organizacao_id");
+  const cols = ["id", ...colunas, "updatedAt"];
+  let n = 0;
+  for (const reg of registos || []) {
+    if (!reg || reg.id == null) continue;
+    const novoT = Date.parse(reg.updated_at || reg.updatedAt) || 0;
+    const valores = {};
+    for (const c of colunas) {
+      if (reg[c] !== undefined && reg[c] !== null) valores[c] = reg[c];
+    }
+    if (temOrg && reg.organizacao_id != null) valores.organizacao_id = reg.organizacao_id;
+    if (temOrg && reg.organizacao_id == null && orgId != null) valores.organizacao_id = orgId;
+    valores.updatedAt = new Date(novoT || Date.now());
+
+    const atual = await Model.findByPk(reg.id, { raw: true });
+    if (!atual) {
+      valores.id = reg.id;
+      const chaves = Object.keys(valores);
+      await sequelize.query(
+        `INSERT INTO \`${Model.tableName}\` (\`${chaves.join("`, `")}\`) VALUES (${chaves.map(() => "?").join(", ")})`,
+        { replacements: chaves.map((k) => valores[k]) }
+      );
+      n++;
+    } else {
+      const atualT = Date.parse(atual.updatedAt) || 0;
+      if (!novoT || novoT <= atualT) continue;
+      const sets = [];
+      const params = [];
+      for (const c of colunas) {
+        if (valores[c] !== undefined) {
+          sets.push(`\`${c}\` = ?`);
+          params.push(valores[c]);
+        }
+      }
+      sets.push("`updatedAt` = ?");
+      params.push(valores.updatedAt);
+      params.push(reg.id);
+      await sequelize.query(
+        `UPDATE \`${Model.tableName}\` SET ${sets.join(", ")} WHERE id = ?`,
+        { replacements: params }
+      );
+      n++;
+    }
+  }
+  return n;
+}
+
+async function alteracoesReal(tabela, orgId, since) {
+  const Model = modelosReais[TABELAS_SINC[tabela]];
+  if (!Model) throw new Error("Tabela não suportada: " + tabela);
+  const temOrg = colunasReais(Model).includes("organizacao_id");
+  const desde = new Date(since || "1970-01-01T00:00:00.000Z");
+  let sql = `SELECT * FROM \`${Model.tableName}\``;
+  const params = [];
+  const onde = [];
+  if (temOrg) {
+    onde.push("`organizacao_id` = ?");
+    params.push(orgId);
+  }
+  onde.push("`updatedAt` > ?");
+  params.push(desde);
+  sql += " WHERE " + onde.join(" AND ") + " ORDER BY `updatedAt` ASC";
+  const [linhas] = await sequelize.query(sql, { replacements: params });
+  return linhas;
+}
+
 module.exports = {
   upsert,
   alteracoes,
@@ -136,4 +239,7 @@ module.exports = {
   COLUNAS_ORG,
   sincronizarOrganizacao,
   organizacaoAtual,
+  upsertReal,
+  alteracoesReal,
+  TABELAS_SINC,
 };

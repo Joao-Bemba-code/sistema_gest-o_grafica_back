@@ -5,6 +5,8 @@ const {
   alteracoes,
   sincronizarOrganizacao,
   organizacaoAtual,
+  upsertReal,
+  alteracoesReal,
 } = require("../services/sincronizacao");
 
 router.use(auth);
@@ -59,6 +61,34 @@ router.post("/organizacao", async (req, res) => {
   } catch (e) {
     console.error("Erro ao sincronizar organização:", e);
     return res.status(500).json({ erro: "Erro ao sincronizar organização: " + (e.message || e) });
+  }
+});
+
+// --- Tabelas reais (ID numérico + LWW) ---
+
+// Recebe registos de uma tabela real e faz upsert no MySQL com Last-Write-Wins.
+router.post("/tabela", async (req, res) => {
+  try {
+    const { tabela, registos } = req.body || {};
+    if (!tabela) return res.status(422).json({ erro: "Tabela obrigatória" });
+    const n = await upsertReal(tabela, req.organizacao_id, registos);
+    return res.json({ ok: true, processados: n });
+  } catch (e) {
+    console.error("Erro no upsert de tabela real:", e);
+    return res.status(500).json({ erro: "Erro na sincronização: " + (e.message || e) });
+  }
+});
+
+// Devolve o que mudou numa tabela real depois de um timestamp.
+router.get("/tabela", async (req, res) => {
+  try {
+    const { tabela, since } = req.query;
+    if (!tabela) return res.status(422).json({ erro: "Tabela obrigatória" });
+    const registos = await alteracoesReal(tabela, req.organizacao_id, since || "1970-01-01T00:00:00.000Z");
+    return res.json({ registos });
+  } catch (e) {
+    console.error("Erro ao obter alterações reais:", e);
+    return res.status(500).json({ erro: "Erro ao obter alterações: " + (e.message || e) });
   }
 });
 
