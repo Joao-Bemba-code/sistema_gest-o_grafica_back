@@ -1,6 +1,11 @@
 const router = require("express").Router();
 const auth = require("../protect/auth");
-const { upsert, alteracoes } = require("../services/sincronizacao");
+const {
+  upsert,
+  alteracoes,
+  sincronizarOrganizacao,
+  organizacaoAtual,
+} = require("../services/sincronizacao");
 
 router.use(auth);
 
@@ -28,6 +33,32 @@ router.get("/alteracoes", async (req, res) => {
   } catch (e) {
     console.error("Erro ao obter alterações:", e);
     return res.status(500).json({ erro: "Erro ao obter alterações: " + (e.message || e) });
+  }
+});
+
+// Estado atual da organização (para o desktop descarregar no 1.º login).
+router.get("/organizacao", async (req, res) => {
+  try {
+    const org = await organizacaoAtual(req.organizacao_id);
+    return res.json({ organizacao: org });
+  } catch (e) {
+    console.error("Erro ao obter organização:", e);
+    return res.status(500).json({ erro: "Erro ao obter organização: " + (e.message || e) });
+  }
+});
+
+// Envia os dados da organização editados no desktop, com LWW.
+router.post("/organizacao", async (req, res) => {
+  try {
+    const dados = (req.body && (req.body.organizacao || req.body.dados)) || req.body;
+    if (!dados || typeof dados !== "object") {
+      return res.status(422).json({ erro: "Dados da organização obrigatórios" });
+    }
+    const r = await sincronizarOrganizacao(req.organizacao_id, dados);
+    return res.json(r);
+  } catch (e) {
+    console.error("Erro ao sincronizar organização:", e);
+    return res.status(500).json({ erro: "Erro ao sincronizar organização: " + (e.message || e) });
   }
 });
 

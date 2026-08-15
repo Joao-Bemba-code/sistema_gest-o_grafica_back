@@ -1,5 +1,6 @@
 const { DataTypes, Op } = require("sequelize");
 const sequelize = require("../config");
+const { Organizacao } = require("../models");
 
 // Tabelas sincronizaveis no servidor (MySQL) e respetivas colunas de negocio.
 // Convencao partilhada com o local:
@@ -9,6 +10,20 @@ const sequelize = require("../config");
 const COLUNAS = {
   clientes: ["nome", "nif", "telefone", "email"],
 };
+
+// A organização é um registo único por org (não tem UUID): sincroniza-se na
+// tabela real (Organizacao) com Last-Write-Wins pelo updatedAt.
+const COLUNAS_ORG = [
+  "nome",
+  "sigla",
+  "nif",
+  "email",
+  "telefone",
+  "endereco",
+  "website",
+  "template_contrato",
+  "logo_url",
+];
 
 const modelos = {};
 for (const [nome, cols] of Object.entries(COLUNAS)) {
@@ -78,4 +93,40 @@ async function inicializarSincronizacao() {
   }
 }
 
-module.exports = { upsert, alteracoes, inicializarSincronizacao, COLUNAS };
+// Upsert da organização (registo único) na tabela real, com LWW.
+// O updatedAt guardado é o timestamp recebido (não a hora do servidor),
+// para que dois computadores decidam sempre pelo mesmo critério.
+async function sincronizarOrganizacao(orgId, dados) {
+  const org = await Organizacao.findByPk(orgId);
+  if (!org) throw new Error("Organização não encontrada");
+  const novoT = Date.parse((dados && (dados.updated_at || dados.updatedAt)) || "") || 0;
+  const atualT = Date.parse(org.updatedAt) || 0;
+  if (novoT && novoT <= atualT) return { ok: true, atualizado: false, updated_at: org.updatedAt };
+  const campos = {};
+  for (const c of COLUNAS_ORG) {
+    if (dados && dados[c] !== undefined && dados[c] !== null) campos[c] = String(dados[c]);
+  }
+  if (novoT) campos.updatedAt = new Date(novoT);
+  let atualizado = false;
+  if (Object.keys(campos).length) {
+    await org.update(campos);
+    atualizado = true;
+  }
+  return { ok: true, atualizado, updated_at: org.updatedAt };
+}
+
+async function organizacaoAtual(orgId) {
+  const org = await Organizacao.findByPk(orgId);
+  if (!org) throw new Error("Organização não encontrada");
+  return { ...org.toJSON(), updated_at: org.updatedAt };
+}
+
+module.exports = {
+  upsert,
+  alteracoes,
+  inicializarSincronizacao,
+  COLUNAS,
+  COLUNAS_ORG,
+  sincronizarOrganizacao,
+  organizacaoAtual,
+};
