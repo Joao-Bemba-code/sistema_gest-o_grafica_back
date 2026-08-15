@@ -109,10 +109,17 @@ async function sincronizarOrganizacao(orgId, dados) {
   if (novoT) campos.updatedAt = new Date(novoT);
   let atualizado = false;
   if (Object.keys(campos).length) {
-    await org.update(campos);
+    // Sequelize ignora updatedAt em update() e mete a hora atual: guardamos
+    // via SQL direto para o LWW ser determinístico entre computadores.
+    const sets = Object.keys(campos)
+      .map((c) => `\`${c}\` = ?`)
+      .join(", ");
+    await sequelize.query(`UPDATE \`organizacao\` SET ${sets} WHERE id = ?`, {
+      replacements: [...Object.values(campos), orgId],
+    });
     atualizado = true;
   }
-  return { ok: true, atualizado, updated_at: org.updatedAt };
+  return { ok: true, atualizado, updated_at: novoT ? new Date(novoT) : org.updatedAt };
 }
 
 async function organizacaoAtual(orgId) {
