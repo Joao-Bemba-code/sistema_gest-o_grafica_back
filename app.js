@@ -19,14 +19,18 @@ function criarApp(opcoes = {}) {
   });
 
   // Rota pública para testar se o servidor está a funcionar (deploy/health check).
-  app.get("/", (req, res) => {
-    res.json({
-      ok: true,
-      servico: "sistema-gest-o-grafica-back",
-      versao: "1.0.0",
-      hora: new Date().toISOString(),
+  // Só é registada no servidor autónomo (deploy); o desktop usa a mesma app
+  // embebida e não pode ocupar a raiz (senão deixa de servir a interface web).
+  if (!opcoes.semRotaRaiz) {
+    app.get("/", (req, res) => {
+      res.json({
+        ok: true,
+        servico: "sistema-gest-o-grafica-back",
+        versao: "1.0.0",
+        hora: new Date().toISOString(),
+      });
     });
-  });
+  }
 
   if (opcoes.proxyUrl) {
     const proxy = require("./proxy");
