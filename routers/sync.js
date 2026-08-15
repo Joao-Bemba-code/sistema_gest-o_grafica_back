@@ -1,5 +1,8 @@
 const router = require("express").Router();
 const auth = require("../protect/auth");
+// Sincronizacao desktop <-> cloud: cada PC da mesma organizacao envia e recebe
+// todas as linhas; a nuvem (MySQL) e o hub central. Os IDs numericos sao
+// gerados localmente por cada PC - cuidado com colisoes entre equipas.
 const {
   sequelize,
   Categoria,
