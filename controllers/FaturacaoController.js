@@ -68,7 +68,7 @@ exports.listar = async (req, res) => {
     if (tipo) where.tipo = tipo;
     const faturas = await Faturacao.findAll({
       where,
-      include: [Cliente, Orcamento, OrdemProducao],
+      include: [{ model: Cliente, required: false }, { model: Orcamento, required: false }, { model: OrdemProducao, required: false }],
       order: [["createdAt", "DESC"]],
     });
     return res.json(faturas);
@@ -82,7 +82,7 @@ exports.buscar = async (req, res) => {
   try {
     const fatura = await Faturacao.findOne({
       where: { id: req.params.id, organizacao_id: req.organizacao_id },
-      include: [Cliente, Orcamento, OrdemProducao],
+      include: [{ model: Cliente, required: false }, { model: Orcamento, required: false }, { model: OrdemProducao, required: false }],
     });
     if (!fatura) return res.status(404).json({ erro: "Fatura não encontrada" });
     return res.json(fatura);
@@ -98,7 +98,7 @@ exports.exportar = async (req, res) => {
     const where = { organizacao_id: req.organizacao_id };
     if (estado && estado !== "todas" && estado !== "todos") where.estado = estado;
     if (tipo) where.tipo = tipo;
-    const faturas = await Faturacao.findAll({ where, include: [Cliente] });
+    const faturas = await Faturacao.findAll({ where, include: [{ model: Cliente, required: false }] });
     const linhas = [
       ["id", "numero", "tipo", "cliente", "data_emissao", "data_vencimento", "subtotal", "iva", "valor_iva", "total", "valor_pago", "estado", "metodo_pagamento"],
       ...faturas.map((f) => [
@@ -157,7 +157,7 @@ async function criarRegisto(req, body) {
     metodo_pagamento: body.metodo || body.metodo_pagamento || null,
     observacoes: body.observacoes || null,
   });
-  return Faturacao.findByPk(fatura.id, { include: [Cliente, Orcamento, OrdemProducao] });
+  return Faturacao.findByPk(fatura.id, { include: [{ model: Cliente, required: false }, { model: Orcamento, required: false }, { model: OrdemProducao, required: false }] });
 }
 
 exports.criar = async (req, res) => {
@@ -174,7 +174,7 @@ exports.fromOrcamento = async (req, res) => {
   try {
     const orcamento = await Orcamento.findOne({
       where: { id: req.params.id, organizacao_id: req.organizacao_id },
-      include: [Cliente, OrcamentoItem],
+      include: [{ model: Cliente, required: false }, { model: OrcamentoItem, required: false }],
     });
     if (!orcamento) return res.status(404).json({ erro: "Orçamento não encontrado" });
     const itens = (orcamento.orcamento_items || []).map((i) => ({
@@ -220,7 +220,7 @@ exports.atualizar = async (req, res) => {
       dados.estado = vp >= total ? "paga" : vp > 0 ? "parcial" : "emitida";
     }
     await fatura.update(dados);
-    const completa = await Faturacao.findByPk(fatura.id, { include: [Cliente, Orcamento, OrdemProducao] });
+    const completa = await Faturacao.findByPk(fatura.id, { include: [{ model: Cliente, required: false }, { model: Orcamento, required: false }, { model: OrdemProducao, required: false }] });
     return res.json(completa);
   } catch (e) {
     console.error("Erro ao atualizar fatura:", e);
@@ -247,7 +247,7 @@ exports.marcarPaga = async (req, res) => {
       metodo_pagamento: body.metodo || body.metodo_pagamento || fatura.metodo_pagamento,
       data_pagamento: body.data_pagamento || new Date().toISOString().split("T")[0],
     });
-    const completa = await Faturacao.findByPk(fatura.id, { include: [Cliente, Orcamento, OrdemProducao] });
+    const completa = await Faturacao.findByPk(fatura.id, { include: [{ model: Cliente, required: false }, { model: Orcamento, required: false }, { model: OrdemProducao, required: false }] });
     return res.json(completa);
   } catch (e) {
     console.error("Erro ao marcar fatura como paga:", e);

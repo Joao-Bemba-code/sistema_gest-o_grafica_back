@@ -45,7 +45,15 @@ function paraBooleano(v) {
 }
 
 function includeOrdem() {
-  return [Cliente, Orcamento, PreImpressao, Impressao, Acabamento, Qualidade, ReservaEstoque];
+  return [
+    { model: Cliente, required: false },
+    { model: Orcamento, required: false },
+    { model: PreImpressao, required: false },
+    { model: Impressao, required: false },
+    { model: Acabamento, required: false },
+    { model: Qualidade, required: false },
+    { model: ReservaEstoque, required: false },
+  ];
 }
 
 async function podeAvancar(ordemId, organizacaoId, transaction) {

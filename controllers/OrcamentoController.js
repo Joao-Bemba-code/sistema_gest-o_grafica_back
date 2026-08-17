@@ -6,8 +6,8 @@ const ESTADOS = ["pendente", "aprovado", "cancelado", "rejeitado"];
 
 function includeCompleto() {
   return [
-    { model: Cliente },
-    { model: OrcamentoItem, include: [{ model: OrcamentoMaterial, as: "materiais" }] },
+    { model: Cliente, required: false },
+    { model: OrcamentoItem, required: false, include: [{ model: OrcamentoMaterial, as: "materiais", required: false }] },
   ];
 }
 

@@ -60,8 +60,7 @@ exports.listar = async (req, res) => {
   try {
     const materiais = await Material.findAll({
       where: { organizacao_id: req.organizacao_id },
-      include: [{ model: Categoria, as: "categoria", attributes: ["id", "nome", "grupo", "tipo", "campos_especificacao"] }],
-      order: [["nome", "ASC"]],
+      include: [{ model: Categoria, as: "categoria", required: false, attributes: ["id", "nome", "grupo", "tipo", "campos_especificacao"] }],
     });
     return res.json(materiais.map(serializar));
   } catch (e) {
@@ -75,9 +74,9 @@ exports.buscarPorId = async (req, res) => {
     const material = await Material.findOne({
       where: { id: req.params.id, organizacao_id: req.organizacao_id },
       include: [
-        { model: Categoria, as: "categoria", attributes: ["id", "nome", "grupo", "tipo", "campos_especificacao"] },
-        { model: MovimentoEstoque, limit: 50, order: [["createdAt", "DESC"]] },
-        { model: ReservaEstoque, limit: 50, order: [["createdAt", "DESC"]] },
+        { model: Categoria, as: "categoria", required: false, attributes: ["id", "nome", "grupo", "tipo", "campos_especificacao"] },
+        { model: MovimentoEstoque, required: false, limit: 50, order: [["createdAt", "DESC"]] },
+        { model: ReservaEstoque, required: false, limit: 50, order: [["createdAt", "DESC"]] },
       ],
     });
     if (!material) return res.status(404).json({ erro: "Material não encontrado" });
@@ -273,8 +272,8 @@ exports.listarReservas = async (req, res) => {
     const reservas = await ReservaEstoque.findAll({
       where,
       include: [
-        { model: Material, attributes: ["id", "nome", "codigo", "unidade"] },
-        { model: OrdemProducao, attributes: ["id", "numero", "estado"] },
+        { model: Material, required: false, attributes: ["id", "nome", "codigo", "unidade"] },
+        { model: OrdemProducao, required: false, attributes: ["id", "numero", "estado"] },
       ],
       order: [["createdAt", "DESC"]],
     });
@@ -292,7 +291,7 @@ exports.extrato = async (req, res) => {
     if (tipo) where.tipo = tipo;
     const movimentos = await MovimentoEstoque.findAll({
       where,
-      include: [{ model: Material, include: [{ model: Categoria, as: "categoria", attributes: ["id", "nome", "grupo"] }] }],
+      include: [{ model: Material, required: false, include: [{ model: Categoria, as: "categoria", required: false, attributes: ["id", "nome", "grupo"] }] }],
       order: [["createdAt", "DESC"]],
     });
     return res.json(movimentos);

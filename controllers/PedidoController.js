@@ -88,7 +88,7 @@ exports.listar = async (req, res) => {
     if (estado) where.estado = estado;
     const pedidos = await Pedido.findAll({
       where,
-      include: [{ model: PedidoItem }],
+      include: [{ model: PedidoItem, required: false }],
       order: [["createdAt", "DESC"]],
     });
     return res.json(pedidos.map(serializar));
@@ -102,7 +102,7 @@ exports.buscarPorId = async (req, res) => {
   try {
     const pedido = await Pedido.findOne({
       where: { id: req.params.id, organizacao_id: req.organizacao_id },
-      include: [{ model: PedidoItem }],
+      include: [{ model: PedidoItem, required: false }],
     });
     if (!pedido) return res.status(404).json({ erro: "Pedido não encontrado" });
     return res.json(serializar(pedido));
@@ -146,7 +146,7 @@ exports.criar = async (req, res) => {
       { transaction: t }
     );
     await t.commit();
-    const completo = await Pedido.findByPk(pedido.id, { include: [{ model: PedidoItem }] });
+    const completo = await Pedido.findByPk(pedido.id, { include: [{ model: PedidoItem, required: false }] });
     return res.status(201).json(serializar(completo));
   } catch (e) {
     await t.rollback();
@@ -159,7 +159,7 @@ exports.cancelar = async (req, res) => {
   try {
     const pedido = await Pedido.findOne({
       where: { id: req.params.id, organizacao_id: req.organizacao_id },
-      include: [{ model: PedidoItem }],
+      include: [{ model: PedidoItem, required: false }],
     });
     if (!pedido) return res.status(404).json({ erro: "Pedido não encontrado" });
     if (pedido.estado === "recebido") {
@@ -178,7 +178,7 @@ exports.receber = async (req, res) => {
   try {
     const pedido = await Pedido.findOne({
       where: { id: req.params.id, organizacao_id: req.organizacao_id },
-      include: [{ model: PedidoItem }],
+      include: [{ model: PedidoItem, required: false }],
       transaction: t,
     });
     if (!pedido) return res.status(404).json({ erro: "Pedido não encontrado" });
@@ -236,7 +236,7 @@ exports.receber = async (req, res) => {
       await pedido.update({ estado: "recebido", data_recebimento: new Date() }, { transaction: t });
     }
     await t.commit();
-    const atualizado = await Pedido.findByPk(pedido.id, { include: [{ model: PedidoItem }] });
+    const atualizado = await Pedido.findByPk(pedido.id, { include: [{ model: PedidoItem, required: false }] });
     return res.json(serializar(atualizado));
   } catch (e) {
     await t.rollback();
