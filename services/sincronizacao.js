@@ -175,8 +175,7 @@ async function upsertReal(tabela, orgId, registos) {
     for (const c of colunas) {
       if (reg[c] !== undefined && reg[c] !== null) valores[c] = reg[c];
     }
-    if (temOrg && reg.organizacao_id != null) valores.organizacao_id = reg.organizacao_id;
-    if (temOrg && reg.organizacao_id == null && orgId != null) valores.organizacao_id = orgId;
+    if (temOrg) valores.organizacao_id = orgId;
     valores.updatedAt = new Date(novoT || Date.now());
 
     const atual = await Model.unscoped().findByPk(reg.id, { raw: true });
