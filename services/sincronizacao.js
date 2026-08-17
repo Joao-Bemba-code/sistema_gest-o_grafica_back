@@ -224,6 +224,7 @@ async function alteracoesReal(tabela, orgId, since) {
     onde.push("`organizacao_id` = ?");
     params.push(orgId);
   }
+  onde.push("(`deleted` = 0 OR `deleted` IS NULL)");
   onde.push("`updatedAt` > ?");
   params.push(desde);
   sql += " WHERE " + onde.join(" AND ") + " ORDER BY `updatedAt` ASC";
