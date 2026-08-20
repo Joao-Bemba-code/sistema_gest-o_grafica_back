@@ -161,6 +161,16 @@ function colunasReais(Model) {
   );
 }
 
+function normalizarDate(val) {
+  if (val === undefined || val === null) return null;
+  if (val instanceof Date) return val;
+  if (typeof val === "string") {
+    const d = new Date(val);
+    if (!isNaN(d)) return d;
+  }
+  return val;
+}
+
 async function upsertReal(tabela, orgId, registos) {
   const Model = modelosReais[TABELAS_SINC[tabela]];
   if (!Model) throw new Error("Tabela não suportada: " + tabela);
@@ -173,7 +183,8 @@ async function upsertReal(tabela, orgId, registos) {
     const novoT = Date.parse(reg.updated_at || reg.updatedAt) || 0;
     const valores = {};
     for (const c of colunas) {
-      if (reg[c] !== undefined && reg[c] !== null) valores[c] = reg[c];
+      const v = normalizarDate(reg[c]);
+      if (v !== undefined && v !== null) valores[c] = v;
     }
     if (temOrg) valores.organizacao_id = orgId;
     valores.updatedAt = new Date(novoT || Date.now());
@@ -181,7 +192,7 @@ async function upsertReal(tabela, orgId, registos) {
     const atual = await Model.unscoped().findByPk(reg.id, { raw: true });
     if (!atual) {
       valores.id = reg.id;
-      valores.createdAt = reg.createdAt ? new Date(Date.parse(reg.createdAt) || Date.now()) : new Date();
+      valores.createdAt = reg.createdAt ? new Date(Date.parse(reg.createdAt)) : new Date();
       const chaves = Object.keys(valores);
       await sequelize.query(
         `INSERT INTO \`${Model.tableName}\` (\`${chaves.join("`, `")}\`) VALUES (${chaves.map(() => "?").join(", ")})`,
