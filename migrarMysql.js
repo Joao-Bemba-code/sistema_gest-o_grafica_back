@@ -13,6 +13,9 @@ async function aplicarMigracoesMysql(sequelize) {
     }
   };
 
+  await adicionar("categoria", "familia", "VARCHAR(100) NULL");
+  await adicionar("categoria", "subfamilia", "VARCHAR(100) NULL");
+  await adicionar("categoria", "tipo", "VARCHAR(100) NULL");
   await adicionar("categoria", "campos_especificacao", "JSON NULL");
   await adicionar("material", "especificacoes", "JSON NULL");
   await adicionar("material", "localizacao", "VARCHAR(100) NULL");
