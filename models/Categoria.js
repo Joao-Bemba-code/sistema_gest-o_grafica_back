@@ -5,10 +5,24 @@ const Categoria = sequelize.define("categoria", {
   id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
   organizacao_id: { type: DataTypes.INTEGER, allowNull: false },
   nome: { type: DataTypes.STRING(100), allowNull: false },
-  tipo: { type: DataTypes.ENUM("material", "servico", "produto"), defaultValue: "material" },
-  grupo: {
-    type: DataTypes.ENUM("papel", "insumo", "acabamento", "produto"),
-    defaultValue: "papel",
+  familia: {
+    type: DataTypes.ENUM(
+      "papeis",
+      "tintas",
+      "chapas",
+      "produto_quimico",
+      "equipamentos",
+      "ferramentas",
+      "suporte_especial",
+      "material_acabamento",
+      "consumiveis"
+    ),
+    defaultValue: "papeis",
+  },
+  subfamilia: { type: DataTypes.STRING(100), allowNull: true },
+  tipo: {
+    type: DataTypes.ENUM("materia_prima", "produto_acabado", "servico"),
+    defaultValue: "materia_prima",
   },
   campos_especificacao: {
     type: DataTypes.JSON,

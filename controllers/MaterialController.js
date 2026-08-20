@@ -1,6 +1,35 @@
 const { sequelize, Material, MovimentoEstoque, Categoria, ReservaEstoque, OrdemProducao } = require("../models");
 const estoqueService = require("../services/estoque");
 
+const FAMILIA_PREFIXO = {
+  papeis: "PAP",
+  tintas: "TIN",
+  chapas: "CHA",
+  produto_quimico: "PQU",
+  equipamentos: "EQU",
+  ferramentas: "FER",
+  suporte_especial: "SPE",
+  material_acabamento: "MAC",
+  consumiveis: "CON",
+};
+
+async function gerarCodigo(organizacaoId, familia) {
+  const prefixo = FAMILIA_PREFIXO[familia] || "MAT";
+  const materiais = await Material.findAll({
+    where: { organizacao_id: organizacaoId, deleted: false },
+    attributes: ["codigo"],
+    order: [["id", "DESC"]],
+  });
+  let maxNum = 0;
+  for (const m of materiais) {
+    if (m.codigo && m.codigo.startsWith(prefixo + "-")) {
+      const num = parseInt(m.codigo.split("-")[1], 10);
+      if (num > maxNum) maxNum = num;
+    }
+  }
+  return `${prefixo}-${String(maxNum + 1).padStart(4, "0")}`;
+}
+
 const CAMPOS_NUMERICOS = [
   "gramagem",
   "largura",
@@ -60,7 +89,7 @@ exports.listar = async (req, res) => {
   try {
     const materiais = await Material.findAll({
       where: { organizacao_id: req.organizacao_id },
-      include: [{ model: Categoria, as: "categoria", required: false, attributes: ["id", "nome", "grupo", "tipo", "campos_especificacao"] }],
+      include: [{ model: Categoria, as: "categoria", required: false, attributes: ["id", "nome", "familia", "subfamilia", "tipo", "campos_especificacao"] }],
     });
     return res.json(materiais.map(serializar));
   } catch (e) {
@@ -74,7 +103,7 @@ exports.buscarPorId = async (req, res) => {
     const material = await Material.findOne({
       where: { id: req.params.id, organizacao_id: req.organizacao_id },
       include: [
-        { model: Categoria, as: "categoria", required: false, attributes: ["id", "nome", "grupo", "tipo", "campos_especificacao"] },
+        { model: Categoria, as: "categoria", required: false, attributes: ["id", "nome", "familia", "subfamilia", "tipo", "campos_especificacao"] },
         { model: MovimentoEstoque, required: false, limit: 50, order: [["createdAt", "DESC"]] },
         { model: ReservaEstoque, required: false, limit: 50, order: [["createdAt", "DESC"]] },
       ],
@@ -90,6 +119,12 @@ exports.buscarPorId = async (req, res) => {
 exports.criar = async (req, res) => {
   try {
     const dados = normalizarDados(req.body);
+    if ((!dados.codigo || dados.codigo.trim() === "") && dados.categoria_id) {
+      const cat = await Categoria.findOne({ where: { id: dados.categoria_id } });
+      if (cat) {
+        dados.codigo = await gerarCodigo(req.organizacao_id, cat.familia);
+      }
+    }
     const material = await Material.create({ ...dados, organizacao_id: req.organizacao_id });
     return res.status(201).json(serializar(material));
   } catch (e) {
@@ -291,7 +326,7 @@ exports.extrato = async (req, res) => {
     if (tipo) where.tipo = tipo;
     const movimentos = await MovimentoEstoque.findAll({
       where,
-      include: [{ model: Material, required: false, include: [{ model: Categoria, as: "categoria", required: false, attributes: ["id", "nome", "grupo"] }] }],
+      include: [{ model: Material, required: false, include: [{ model: Categoria, as: "categoria", required: false, attributes: ["id", "nome", "familia", "tipo"] }] }],
       order: [["createdAt", "DESC"]],
     });
     return res.json(movimentos);

@@ -99,19 +99,19 @@ async function seed() {
       return categoria;
     }
 
-    const categoriasPadrao = ["Papel", "Tintas", "Lonas", "Vinil", "Cola", "Chapas"];
-    for (const nome of categoriasPadrao) {
-      await criarCategoria({ nome, tipo: "material" });
-    }
-
-    const gruposPadrao = [
-      { nome: "Papéis e Mídias", grupo: "papel", tipo: "material" },
-      { nome: "Insumos e Consumíveis", grupo: "insumo", tipo: "material" },
-      { nome: "Acabamento e Logística", grupo: "acabamento", tipo: "material" },
-      { nome: "Produtos Prontos", grupo: "produto", tipo: "produto" },
+    const categoriasSeed = [
+      { nome: "Papel Couché", familia: "papeis", subfamilia: "Couché", tipo: "materia_prima" },
+      { nome: "Papel Offset", familia: "papeis", subfamilia: "Offset", tipo: "materia_prima" },
+      { nome: "Tinta Solvente", familia: "tintas", subfamilia: "Solvente", tipo: "materia_prima" },
+      { nome: "Tinta UV", familia: "tintas", subfamilia: "UV", tipo: "materia_prima" },
+      { nome: "Chapa CTP", familia: "chapas", subfamilia: "CTP", tipo: "materia_prima" },
+      { nome: "Cola", familia: "material_acabamento", subfamilia: "", tipo: "materia_prima" },
+      { nome: "Lona", familia: "suporte_especial", subfamilia: "", tipo: "materia_prima" },
+      { nome: "Vinil", familia: "suporte_especial", subfamilia: "", tipo: "materia_prima" },
+      { nome: "Produto Pronto", familia: "consumiveis", subfamilia: "", tipo: "produto_acabado" },
     ];
-    for (const c of gruposPadrao) {
-      await criarCategoria(c);
+    for (const cat of categoriasSeed) {
+      await criarCategoria(cat);
     }
 
     console.log("✅ Seed concluído!");
