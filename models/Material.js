@@ -34,6 +34,7 @@ const Material = sequelize.define("material", {
   margem: { type: DataTypes.DECIMAL(5, 2), defaultValue: 0 },
   ativo: { type: DataTypes.BOOLEAN, defaultValue: true },
   deleted: { type: DataTypes.BOOLEAN, defaultValue: false },
+  lucro: { type: DataTypes.DECIMAL(5,2), defaultValue: 0 },
   deletedAt: { type: DataTypes.DATE, allowNull: true },
 }, {
   defaultScope: { where: { deleted: false } },
