@@ -12,9 +12,22 @@ exports.listar = async (req, res) => {
   }
 };
 
+async function nomeDuplicado(organizacaoId, nome, ignorarId = null) {
+  const normalizar = (s) => String(s || "").trim().toLowerCase();
+  const alvo = normalizar(nome);
+  if (!alvo) return false;
+  const categorias = await Categoria.findAll({
+    where: { organizacao_id: organizacaoId, deleted: false },
+  });
+  return categorias.some((c) => String(c.id) !== String(ignorarId) && normalizar(c.nome) === alvo);
+}
+
 exports.criar = async (req, res) => {
   try {
     const dados = { ...req.body, organizacao_id: req.organizacao_id };
+    if (await nomeDuplicado(req.organizacao_id, dados.nome)) {
+      return res.status(409).json({ erro: `Já existe uma categoria com o nome "${String(dados.nome).trim()}". Escolha outro nome ou use a existente.` });
+    }
     const categoria = await Categoria.create(dados);
     return res.status(201).json(categoria);
   } catch (e) {
@@ -46,6 +59,9 @@ exports.atualizar = async (req, res) => {
     delete dados.organizacao_id;
     if (dados.campos_especificacao !== undefined && !Array.isArray(dados.campos_especificacao)) {
       return res.status(422).json({ erro: "campos_especificacao deve ser uma lista" });
+    }
+    if (await nomeDuplicado(req.organizacao_id, dados.nome ?? categoria.nome, categoria.id)) {
+      return res.status(409).json({ erro: `Já existe outra categoria com o nome "${String(dados.nome).trim()}".` });
     }
     await categoria.update(dados);
     return res.json(categoria);
