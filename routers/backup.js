@@ -7,7 +7,7 @@ router.use(auth);
 
 router.get("/zip", async (req, res) => {
   try {
-    const { caminho, nome } = criarZipBackup();
+    const { caminho, nome } = await criarZipBackup();
     res.download(caminho, nome, (err) => {
       fs.rmSync(caminho, { force: true });
       if (err && !res.headersSent) {
