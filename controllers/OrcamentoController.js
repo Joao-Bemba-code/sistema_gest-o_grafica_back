@@ -1,4 +1,4 @@
-const { sequelize, Orcamento, OrcamentoItem, OrcamentoMaterial, Cliente, Sequencia } = require("../models");
+const { sequelize, Orcamento, OrcamentoItem, OrcamentoMaterial, OrcamentoServico, Cliente, Sequencia } = require("../models");
 const { Transaction } = require("sequelize");
 const validador = require("../validators/orcamento");
 
@@ -8,6 +8,7 @@ function includeCompleto() {
   return [
     { model: Cliente, required: false },
     { model: OrcamentoItem, required: false, include: [{ model: OrcamentoMaterial, as: "materiais", required: false }] },
+    { model: OrcamentoServico, as: "servicos", required: false },
   ];
 }
 
@@ -35,6 +36,7 @@ function normalizarDados(body) {
     prazo_execucao: body.prazoExecucao,
     condicoes_pagamento: body.condicoesPagamento,
     iva: body.iva != null ? body.iva : 0,
+    desconto: body.desconto != null ? body.desconto : 0,
     observacoes: body.observacoes,
   };
   if (Object.keys(spec).length) dados.especificacao_json = spec;
@@ -76,13 +78,34 @@ function normalizarItens(itens) {
         descricao: i.descricao,
         quantidade,
         preco_unit: precoUnit,
-        total: quantidade * precoUnit,
+        total: parseFloat(i.total) || (quantidade * precoUnit),
         composto: Boolean(i.composto),
         margem: parseFloat(i.margem) || 0,
         materiais,
       };
     })
     .filter((i) => i.descricao && String(i.descricao).trim());
+}
+
+function normalizarServicos(servicos) {
+  return (servicos || [])
+    .map((s) => {
+      const mob = parseInt(s.mob, 10) || 1;
+      const prazoExecucao = parseInt(s.prazoExecucao || s.prazo_execucao, 10) || 1;
+      const duracaoHoras = prazoExecucao * 8;
+      const valorHora = parseFloat(s.valor_hora) || 0;
+      const total = mob * duracaoHoras * valorHora;
+      return {
+        servico_id: s.servico_id || null,
+        descricao: String(s.descricao || "").trim() || "Serviço",
+        mob,
+        prazo_execucao: prazoExecucao,
+        duracao_horas: duracaoHoras,
+        valor_hora: valorHora,
+        total: Number(total.toFixed(2)),
+      };
+    })
+    .filter((s) => s.descricao);
 }
 
 function serializar(o) {
@@ -105,6 +128,15 @@ function serializar(o) {
       custo_total: Number(m.custo_total) || 0,
       mover_estoque: Boolean(m.mover_estoque),
     })),
+  }));
+  const servicos = (o.orcamento_servicos || o.servicos || []).map((s) => ({
+    id: s.id,
+    descricao: s.descricao,
+    mob: Number(s.mob) || 1,
+    prazoExecucao: Number(s.prazo_execucao) || 1,
+    duracaoHoras: Number(s.duracao_horas) || 0,
+    valorHora: Number(s.valor_hora) || 0,
+    total: Number(s.total) || 0,
   }));
   return {
     id: o.id,
@@ -131,7 +163,9 @@ function serializar(o) {
       acabamento: o.acabamento || "",
     },
     itens,
+    servicos,
     subtotal: Number(o.total_sem_iva) || 0,
+    desconto: Number(o.desconto) || 0,
     iva: Number(o.iva) || 0,
     valorIva: Number(o.total_iva) || 0,
     total: Number(o.total_com_iva) || 0,
@@ -210,6 +244,10 @@ exports.criar = async (req, res) => {
       });
       if (materiais.length) await OrcamentoMaterial.bulkCreate(materiais);
     }
+    if (req.body.servicos && req.body.servicos.length) {
+      const servicos = normalizarServicos(req.body.servicos);
+      if (servicos.length) await OrcamentoServico.bulkCreate(servicos.map((s) => ({ ...s, orcamento_id: orcamento.id })));
+    }
     await recalcularTotais(orcamento.id);
     const completo = await Orcamento.findByPk(orcamento.id, { include: includeCompleto() });
     return res.status(201).json(serializar(completo));
@@ -245,6 +283,11 @@ exports.atualizar = async (req, res) => {
         if (materiais.length) await OrcamentoMaterial.bulkCreate(materiais);
       }
     }
+    if (req.body.servicos !== undefined) {
+      await OrcamentoServico.update({ deleted: 1, deletedAt: new Date() }, { where: { orcamento_id: orcamento.id } });
+      const servicos = normalizarServicos(req.body.servicos);
+      if (servicos.length) await OrcamentoServico.bulkCreate(servicos.map((s) => ({ ...s, orcamento_id: orcamento.id })));
+    }
     await recalcularTotais(orcamento.id);
     const completo = await Orcamento.findByPk(orcamento.id, { include: includeCompleto() });
     return res.json(serializar(completo));
@@ -263,6 +306,7 @@ exports.remover = async (req, res) => {
     const idsItens = (await OrcamentoItem.findAll({ where: { orcamento_id: orcamento.id }, attributes: ["id"] })).map((i) => i.id);
     if (idsItens.length) await OrcamentoMaterial.update({ deleted: 1, deletedAt: new Date() }, { where: { orcamento_item_id: idsItens } });
     await OrcamentoItem.update({ deleted: 1, deletedAt: new Date() }, { where: { orcamento_id: orcamento.id } });
+    await OrcamentoServico.update({ deleted: 1, deletedAt: new Date() }, { where: { orcamento_id: orcamento.id } });
     await orcamento.update({ deleted: 1, deletedAt: new Date() });
     return res.json({ mensagem: "Orçamento removido com sucesso" });
   } catch (e) {
@@ -273,13 +317,18 @@ exports.remover = async (req, res) => {
 
 async function recalcularTotais(orcamentoId) {
   const itens = await OrcamentoItem.findAll({ where: { orcamento_id: orcamentoId } });
-  const totalSemIva = itens.reduce((s, i) => s + parseFloat(i.total || 0), 0);
+  const servicos = await OrcamentoServico.findAll({ where: { orcamento_id: orcamentoId } });
+  const totalItens = itens.reduce((s, i) => s + parseFloat(i.total || 0), 0);
+  const totalServicos = servicos.reduce((s, sv) => s + parseFloat(sv.total || 0), 0);
+  const totalSemIva = totalItens + totalServicos;
   const orcamento = await Orcamento.findByPk(orcamentoId);
+  const desconto = parseFloat(orcamento.desconto || 0);
+  const totalPosDesconto = Math.max(0, totalSemIva - desconto);
   const ivaPct = parseFloat(orcamento.iva || 0);
-  const totalIva = totalSemIva * (ivaPct / 100);
+  const totalIva = totalPosDesconto * (ivaPct / 100);
   await orcamento.update({
     total_sem_iva: totalSemIva,
     total_iva: Number(totalIva.toFixed(2)),
-    total_com_iva: Number((totalSemIva + totalIva).toFixed(2)),
+    total_com_iva: Number((totalPosDesconto + totalIva).toFixed(2)),
   });
 }

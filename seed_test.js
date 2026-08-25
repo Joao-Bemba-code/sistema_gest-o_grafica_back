@@ -31,18 +31,18 @@ const CLIENTES = [
 ];
 
 const MATERIAIS = [
-  { nome: "Papel Couché 150g A4", cat: "Papel", un: "folha", tipo: "folha", formato: "A4", gramagem: 150, qtd: 8000, min: 1000, quebra: 3, custo: 85, margem: 40 },
-  { nome: "Papel Couché 300g A4", cat: "Papel", un: "folha", tipo: "folha", formato: "A4", gramagem: 300, qtd: 5000, min: 500, quebra: 5, custo: 120, margem: 40 },
-  { nome: "Papel Offset 80g A4", cat: "Papel", un: "folha", tipo: "folha", formato: "A4", gramagem: 80, qtd: 20000, min: 3000, quebra: 2, custo: 55, margem: 35 },
-  { nome: "Papel Cartolina 250g A3", cat: "Papel", un: "folha", tipo: "folha", formato: "A3", gramagem: 250, qtd: 3000, min: 500, quebra: 0, custo: 70, margem: 40 },
-  { nome: "Tinta Cyan (Offset)", cat: "Tinta", un: "kg", tipo: "peso", qtd: 12, min: 3, quebra: 0, custo: 3500, margem: 30 },
-  { nome: "Tinta Magenta (Offset)", cat: "Tinta", un: "kg", tipo: "peso", qtd: 12, min: 3, quebra: 0, custo: 3500, margem: 30 },
-  { nome: "Tinta Preta (Offset)", cat: "Tinta", un: "kg", tipo: "peso", qtd: 25, min: 5, quebra: 0, custo: 3000, margem: 30 },
-  { nome: "Chapa Offset", cat: "Chapas", un: "un", tipo: "unidade", qtd: 30, min: 10, quebra: 0, custo: 4500, margem: 25 },
-  { nome: "Vinil Auto-adesivo Brilhante", cat: "Etiquetas", un: "m²", tipo: "metro", qtd: 80, min: 20, quebra: 5, custo: 1500, margem: 35 },
-  { nome: "Cartão Kraft 3mm", cat: "Cartão", un: "un", tipo: "unidade", qtd: 500, min: 100, quebra: 2, custo: 250, margem: 40 },
-  { nome: "Verniz UV", cat: "Acabamento", un: "litro", tipo: "volume", qtd: 10, min: 4, quebra: 0, custo: 2800, margem: 30 },
-  { nome: "Etiqueta Branca A4", cat: "Etiquetas", un: "folha", tipo: "folha", formato: "A4", qtd: 25, min: 100, quebra: 0, custo: 180, margem: 30 },
+  { nome: "Papel Couché 150g A4", cat: "Papel", un: "folha", tipo: "folha", formato: "A4", gramagem: 150, qtd: 8000, min: 1000, quebra: 3, custo: 85, lucro: 40 },
+  { nome: "Papel Couché 300g A4", cat: "Papel", un: "folha", tipo: "folha", formato: "A4", gramagem: 300, qtd: 5000, min: 500, quebra: 5, custo: 120, lucro: 40 },
+  { nome: "Papel Offset 80g A4", cat: "Papel", un: "folha", tipo: "folha", formato: "A4", gramagem: 80, qtd: 20000, min: 3000, quebra: 2, custo: 55, lucro: 35 },
+  { nome: "Papel Cartolina 250g A3", cat: "Papel", un: "folha", tipo: "folha", formato: "A3", gramagem: 250, qtd: 3000, min: 500, quebra: 0, custo: 70, lucro: 40 },
+  { nome: "Tinta Cyan (Offset)", cat: "Tinta", un: "kg", tipo: "peso", qtd: 12, min: 3, quebra: 0, custo: 3500, lucro: 30 },
+  { nome: "Tinta Magenta (Offset)", cat: "Tinta", un: "kg", tipo: "peso", qtd: 12, min: 3, quebra: 0, custo: 3500, lucro: 30 },
+  { nome: "Tinta Preta (Offset)", cat: "Tinta", un: "kg", tipo: "peso", qtd: 25, min: 5, quebra: 0, custo: 3000, lucro: 30 },
+  { nome: "Chapa Offset", cat: "Chapas", un: "un", tipo: "unidade", qtd: 30, min: 10, quebra: 0, custo: 4500, lucro: 25 },
+  { nome: "Vinil Auto-adesivo Brilhante", cat: "Etiquetas", un: "m²", tipo: "metro", qtd: 80, min: 20, quebra: 5, custo: 1500, lucro: 35 },
+  { nome: "Cartão Kraft 3mm", cat: "Cartão", un: "un", tipo: "unidade", qtd: 500, min: 100, quebra: 2, custo: 250, lucro: 40 },
+  { nome: "Verniz UV", cat: "Acabamento", un: "litro", tipo: "volume", qtd: 10, min: 4, quebra: 0, custo: 2800, lucro: 30 },
+  { nome: "Etiqueta Branca A4", cat: "Etiquetas", un: "folha", tipo: "folha", formato: "A4", qtd: 25, min: 100, quebra: 0, custo: 180, lucro: 30 },
 ];
 
 const ORCAMENTOS = [
@@ -147,7 +147,7 @@ async function semearOrg(org) {
       estoque_max: m.qtd * 3,
       ponto_ressuprimento: m.min * 2,
       custo_unit: m.custo,
-      margem: m.margem,
+      lucro: m.lucro,
       descricao: `${m.nome} — material para indústria gráfica`,
       condicao_armazenagem: "Local seco e arejado, longe da luz direta",
       ativo: true,

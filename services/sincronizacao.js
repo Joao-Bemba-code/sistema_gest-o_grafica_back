@@ -144,6 +144,7 @@ const TABELAS_SINC = {
   orcamento: "Orcamento",
   orcamento_item: "OrcamentoItem",
   orcamento_material: "OrcamentoMaterial",
+  orcamento_servico: "OrcamentoServico",
   ordem_producao: "OrdemProducao",
   pre_impressao: "PreImpressao",
   impressao: "Impressao",

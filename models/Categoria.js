@@ -15,7 +15,16 @@ const Categoria = sequelize.define("categoria", {
       "ferramentas",
       "suporte_especial",
       "material_acabamento",
-      "consumiveis"
+      "consumiveis",
+      "impressao",
+      "acabamento",
+      "pre_impressao",
+      "design",
+      "montagem",
+      "logistica",
+      "consultoria",
+      "manutencao",
+      "servicos_gerais"
     ),
     defaultValue: "papeis",
   },

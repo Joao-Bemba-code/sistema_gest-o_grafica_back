@@ -20,6 +20,7 @@ async function aplicarMigracoesMysql(sequelize) {
   await adicionar("material", "especificacoes", "JSON NULL");
   await adicionar("material", "localizacao", "VARCHAR(100) NULL");
   await adicionar("material", "lucro", "DECIMAL(5,2) NULL DEFAULT 0");
+  await adicionar("orcamento", "desconto", "DECIMAL(12,2) NULL DEFAULT 0");
   await adicionar("orcamento", "especificacao_json", "JSON NULL");
   await adicionar("orcamento_item", "composto", "TINYINT(1) NOT NULL DEFAULT 0");
   await adicionar("orcamento_item", "margem", "DECIMAL(12,2) NOT NULL DEFAULT 0");
@@ -35,6 +36,7 @@ async function aplicarMigracoesMysql(sequelize) {
     "orcamento",
     "orcamento_item",
     "orcamento_material",
+    "orcamento_servico",
     "ordem_producao",
     "pre_impressao",
     "impressao",
@@ -61,6 +63,33 @@ async function aplicarMigracoesMysql(sequelize) {
        ENUM('manual','op','ajuste','nf_e','reserva','devolucao','pedido') NOT NULL DEFAULT 'manual'`
     );
     console.log("MIGRAÇÃO: movimento_estoque.referencia_tipo inclui 'pedido'");
+  }
+
+  await adicionar("orcamento_servico", "servico_id", "INT NULL");
+
+  const catFamRef = await sequelize.query(
+    `SELECT COLUMN_TYPE FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'categoria' AND COLUMN_NAME = 'familia'`,
+    { type: sequelize.QueryTypes.SELECT }
+  );
+  if (catFamRef.length && !catFamRef[0].COLUMN_TYPE.includes("impressao")) {
+    await sequelize.query(
+      `UPDATE categoria SET familia = 'papeis' WHERE familia IS NULL OR familia = ''`
+    );
+    try {
+      await sequelize.query(`SET SESSION sql_mode = 'NO_ENGINE_SUBSTITUTION'`);
+      await sequelize.query(
+        `ALTER TABLE \`categoria\` MODIFY \`familia\`
+         ENUM('papeis','tintas','chapas','produto_quimico','equipamentos','ferramentas','suporte_especial','material_acabamento','consumiveis','impressao','acabamento','pre_impressao','design','montagem','logistica','consultoria','manutencao','servicos_gerais') NOT NULL DEFAULT 'papeis'`
+      );
+      console.log("MIGRAÇÃO: categoria.familia inclui famílias de serviços");
+    } catch (e) {
+      if (e.code === "WARN_DATA_TRUNCATED" || e.parent?.code === "WARN_DATA_TRUNCATED") {
+        console.log("MIGRAÇÃO: categoria.familia actualizado (warnings ignorados)");
+      } else {
+        throw e;
+      }
+    }
   }
 }
 

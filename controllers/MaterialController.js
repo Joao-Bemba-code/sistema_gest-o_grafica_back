@@ -41,7 +41,7 @@ const CAMPOS_NUMERICOS = [
   "estoque_max",
   "ponto_ressuprimento",
   "custo_unit",
-  "margem",
+  "lucro",
 ];
 
 function normalizarDados(body) {
@@ -74,7 +74,7 @@ function serializar(material) {
   let status = "ok";
   if (disponivel <= 0) status = "esgotado";
   else if (disponivel <= ponto) status = "repor";
-  const preco_venda = (parseFloat(obj.custo_unit) || 0) * (1 + (parseFloat(obj.margem) || 0) / 100);
+  const preco_venda = (parseFloat(obj.custo_unit) || 0) * (1 + (parseFloat(obj.lucro) || 0) / 100);
   return {
     ...obj,
     quantidade: Number(Number(quantidade).toFixed(2)),

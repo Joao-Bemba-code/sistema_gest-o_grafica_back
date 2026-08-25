@@ -21,6 +21,8 @@ const Fornecedor = require("./Fornecedor");
 const Sequencia = require("./Sequencia");
 const Pedido = require("./Pedido");
 const PedidoItem = require("./PedidoItem");
+const OrcamentoServico = require("./OrcamentoServico");
+const Servico = require("./Servico");
 
 Organizacao.hasMany(Usuario, { foreignKey: "organizacao_id" });
 Usuario.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
@@ -52,8 +54,16 @@ Orcamento.hasMany(OrcamentoItem, { foreignKey: "orcamento_id" });
 OrcamentoItem.belongsTo(Orcamento, { foreignKey: "orcamento_id" });
 OrcamentoItem.hasMany(OrcamentoMaterial, { foreignKey: "orcamento_item_id", as: "materiais" });
 OrcamentoMaterial.belongsTo(OrcamentoItem, { foreignKey: "orcamento_item_id" });
+Orcamento.hasMany(OrcamentoServico, { foreignKey: "orcamento_id", as: "servicos" });
+OrcamentoServico.belongsTo(Orcamento, { foreignKey: "orcamento_id" });
 Material.hasMany(OrcamentoMaterial, { foreignKey: "material_id" });
 OrcamentoMaterial.belongsTo(Material, { foreignKey: "material_id" });
+
+Organizacao.hasMany(Servico, { foreignKey: "organizacao_id" });
+Servico.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
+Categoria.hasMany(Servico, { foreignKey: "categoria_id", as: "servicos" });
+Servico.belongsTo(Categoria, { foreignKey: "categoria_id", as: "categoria" });
+OrcamentoServico.belongsTo(Servico, { foreignKey: "servico_id", as: "servicoCatalogo" });
 
 Organizacao.hasMany(OrdemProducao, { foreignKey: "organizacao_id" });
 OrdemProducao.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
@@ -126,6 +136,8 @@ module.exports = {
   Orcamento,
   OrcamentoItem,
   OrcamentoMaterial,
+  OrcamentoServico,
+  Servico,
   OrdemProducao,
   PreImpressao,
   Impressao,

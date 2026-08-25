@@ -13,7 +13,7 @@ const sequelize = require("../config");
 const ORDEM = [
   "Organizacao", "Usuario", "Sistema", "Seguranca", "Sequencia",
   "Categoria", "Fornecedor", "Cliente", "Material", "MovimentoEstoque",
-  "Orcamento", "OrcamentoItem", "OrcamentoMaterial", "OrdemProducao",
+  "Orcamento", "OrcamentoItem", "OrcamentoMaterial", "OrcamentoServico", "OrdemProducao",
   "PreImpressao", "Impressao", "Acabamento", "Qualidade", "ReservaEstoque",
   "Faturacao", "Pedido", "PedidoItem",
 ];
