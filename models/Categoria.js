@@ -37,6 +37,7 @@ const Categoria = sequelize.define("categoria", {
     type: DataTypes.JSON,
     defaultValue: [],
   },
+  validade_dias: { type: DataTypes.INTEGER, allowNull: true, defaultValue: null, comment: "Dias de validade para produtos químicos" },
   deleted: { type: DataTypes.BOOLEAN, defaultValue: false },
   deletedAt: { type: DataTypes.DATE, allowNull: true },
 }, {
