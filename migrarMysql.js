@@ -91,6 +91,26 @@ async function aplicarMigracoesMysql(sequelize) {
       }
     }
   }
+
+  await adicionar("movimento_estoque", "material_destino_id", "INT NULL");
+
+  const movTipoRef = await sequelize.query(
+    "SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'movimento_estoque' AND COLUMN_NAME = 'tipo'",
+    { type: sequelize.QueryTypes.SELECT }
+  );
+  if (movTipoRef.length && !movTipoRef[0].COLUMN_TYPE.includes("transferencia")) {
+    try {
+      await sequelize.query("SET SESSION sql_mode = 'NO_ENGINE_SUBSTITUTION'");
+      await sequelize.query(
+        "ALTER TABLE `movimento_estoque` MODIFY `tipo` ENUM('entrada','saida','transferencia','perda','desperdicio') NOT NULL DEFAULT 'entrada'"
+      );
+      console.log("MIGRAÇÃO: movimento_estoque.tipo inclui transferencia, perda, desperdicio");
+    } catch (e) {
+      if (e.code === "WARN_DATA_TRUNCATED" || e.parent?.code === "WARN_DATA_TRUNCATED") {
+        console.log("MIGRAÇÃO: movimento_estoque.tipo actualizado");
+      } else throw e;
+    }
+  }
 }
 
 module.exports = { aplicarMigracoesMysql };
