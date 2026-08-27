@@ -23,6 +23,7 @@ const Pedido = require("./Pedido");
 const PedidoItem = require("./PedidoItem");
 const OrcamentoServico = require("./OrcamentoServico");
 const Servico = require("./Servico");
+const Maquina = require("./Maquina");
 
 Organizacao.hasMany(Usuario, { foreignKey: "organizacao_id" });
 Usuario.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
@@ -40,6 +41,9 @@ Organizacao.hasMany(Material, { foreignKey: "organizacao_id" });
 Material.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
   Categoria.hasMany(Material, { foreignKey: "categoria_id", as: "materiais" });
   Material.belongsTo(Categoria, { foreignKey: "categoria_id", as: "categoria" });
+
+Categoria.hasMany(Maquina, { foreignKey: "categoria_id", as: "maquinas" });
+  Maquina.belongsTo(Categoria, { foreignKey: "categoria_id", as: "categoria" });
 
 Organizacao.hasMany(MovimentoEstoque, { foreignKey: "organizacao_id" });
 MovimentoEstoque.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
@@ -150,4 +154,5 @@ module.exports = {
   Sequencia,
   Pedido,
   PedidoItem,
+  Maquina,
 };

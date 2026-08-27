@@ -50,6 +50,7 @@ function criarApp(opcoes = {}) {
     app.use("/api/fornecedores", require("./routers/fornecedores"));
     app.use("/api/pedidos", require("./routers/pedidos"));
     app.use("/api/servicos", require("./routers/servicos"));
+    app.use("/api/maquinas", require("./routers/maquinas"));
     app.use("/api/backup", require("./routers/backup"));
     app.use("/api/sinc", require("./routers/sincronizacao"));
     app.get("/api/health", (req, res) => res.json({ ok: true, hora: new Date().toISOString() }));
