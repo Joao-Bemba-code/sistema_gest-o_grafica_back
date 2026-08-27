@@ -96,6 +96,20 @@ async function aplicarMigracoesMysql(sequelize) {
 
   await adicionar("movimento_estoque", "material_destino_id", "INT NULL");
 
+  const catTipoRef = await sequelize.query(
+    "SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'categoria' AND COLUMN_NAME = 'tipo'",
+    { type: sequelize.QueryTypes.SELECT }
+  );
+  if (catTipoRef.length && catTipoRef[0].COLUMN_TYPE.includes("ENUM")) {
+    try {
+      await sequelize.query("SET SESSION sql_mode = 'NO_ENGINE_SUBSTITUTION'");
+      await sequelize.query("ALTER TABLE `categoria` MODIFY `tipo` VARCHAR(50) NOT NULL DEFAULT 'materia_prima'");
+      console.log("MIGRAÇÃO: categoria.tipo alterado de ENUM para VARCHAR(50)");
+    } catch (e) {
+      console.error("MIGRAÇÃO: erro ao alterar categoria.tipo", e.message);
+    }
+  }
+
   const movTipoRef = await sequelize.query(
     "SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'movimento_estoque' AND COLUMN_NAME = 'tipo'",
     { type: sequelize.QueryTypes.SELECT }

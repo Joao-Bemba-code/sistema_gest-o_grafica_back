@@ -30,7 +30,7 @@ const Categoria = sequelize.define("categoria", {
   },
   subfamilia: { type: DataTypes.STRING(100), allowNull: true },
   tipo: {
-    type: DataTypes.ENUM("materia_prima", "produto_acabado", "servico"),
+    type: DataTypes.STRING(50),
     defaultValue: "materia_prima",
   },
   campos_especificacao: {
