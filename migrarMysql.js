@@ -101,6 +101,9 @@ async function aplicarMigracoesMysql(sequelize) {
     "SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'categoria' AND COLUMN_NAME = 'familia'",
     { type: sequelize.QueryTypes.SELECT }
   );
+  if (catFamEnum.length) {
+    console.log("MIGRAÇÃO: categoria.familia é actualmente:", catFamEnum[0].COLUMN_TYPE);
+  }
   if (catFamEnum.length && catFamEnum[0].COLUMN_TYPE.includes("ENUM")) {
     try {
       await sequelize.query("SET SESSION sql_mode = 'NO_ENGINE_SUBSTITUTION'");
@@ -109,6 +112,8 @@ async function aplicarMigracoesMysql(sequelize) {
     } catch (e) {
       console.error("MIGRAÇÃO: erro ao alterar categoria.familia", e.message);
     }
+  } else {
+    console.log("MIGRAÇÃO: categoria.familia já é VARCHAR (nada a fazer)");
   }
 
   await adicionar("movimento_estoque", "material_destino_id", "INT NULL");
