@@ -94,6 +94,23 @@ async function aplicarMigracoesMysql(sequelize) {
     }
   }
 
+  // Campo Família do Novo Recurso passou a ser editável (permite criar novas
+  // famílias em texto livre). Deixa de ser ENUM de valores fixos para aceitar
+  // qualquer família nova escrita pelo utilizador em produção.
+  const catFamEnum = await sequelize.query(
+    "SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'categoria' AND COLUMN_NAME = 'familia'",
+    { type: sequelize.QueryTypes.SELECT }
+  );
+  if (catFamEnum.length && catFamEnum[0].COLUMN_TYPE.includes("ENUM")) {
+    try {
+      await sequelize.query("SET SESSION sql_mode = 'NO_ENGINE_SUBSTITUTION'");
+      await sequelize.query("ALTER TABLE `categoria` MODIFY `familia` VARCHAR(50) NOT NULL DEFAULT 'papeis'");
+      console.log("MIGRAÇÃO: categoria.familia alterado de ENUM para VARCHAR(50)");
+    } catch (e) {
+      console.error("MIGRAÇÃO: erro ao alterar categoria.familia", e.message);
+    }
+  }
+
   await adicionar("movimento_estoque", "material_destino_id", "INT NULL");
 
   const catTipoRef = await sequelize.query(
