@@ -1,4 +1,4 @@
-const { sequelize, OrdemProducao, PreImpressao, Impressao, Acabamento, Qualidade, Cliente, Orcamento, ReservaEstoque } = require("../models");
+const { sequelize, OrdemProducao, PreImpressao, Impressao, Acabamento, Qualidade, Cliente, Orcamento, ReservaEstoque, Maquina } = require("../models");
 const estoqueService = require("../services/estoque");
 
 const ESTADOS_ORDEM = ["aguardando", "em_producao", "finalizado", "entregue"];
@@ -215,6 +215,67 @@ exports.libertarMateriais = async (req, res) => {
   }
 };
 
+exports.libertarParaMaquina = async (req, res) => {
+  const t = await sequelize.transaction();
+  try {
+    const ordem = await OrdemProducao.findOne({
+      where: { id: req.params.id, organizacao_id: req.organizacao_id },
+      transaction: t,
+    });
+    if (!ordem) {
+      await t.rollback();
+      return res.status(404).json({ erro: "Ordem não encontrada" });
+    }
+    if (ordem.requisicao_estado !== "libertada") {
+      await t.rollback();
+      return res.status(422).json({
+        erro: "Os materiais desta OP ainda não foram libertados. Faça primeiro a saída de materiais.",
+      });
+    }
+    const b = req.body || {};
+    let maquinaNome = String(b.maquina || "").trim();
+    const maquinaId = b.maquina_id ? Number(b.maquina_id) : null;
+    if (maquinaId) {
+      const maq = await Maquina.findOne({
+        where: { id: maquinaId, organizacao_id: req.organizacao_id },
+        transaction: t,
+      });
+      if (maq) maquinaNome = maq.nome_comum;
+    }
+    if (!maquinaNome) {
+      await t.rollback();
+      return res.status(422).json({ erro: "Selecione a máquina para a produção" });
+    }
+    const dataInicio = b.data_inicio || new Date().toISOString();
+    const [imp, criado] = await Impressao.findOrCreate({
+      where: { ordem_producao_id: ordem.id, organizacao_id: req.organizacao_id },
+      defaults: {
+        organizacao_id: req.organizacao_id,
+        ordem_producao_id: ordem.id,
+        maquina: maquinaNome,
+        operador: String(b.operador || ""),
+        data_inicio: dataInicio,
+        usuario_id: req.usuario.id,
+      },
+      transaction: t,
+    });
+    if (!criado) {
+      await imp.update(
+        { maquina: maquinaNome, operador: String(b.operador || imp.operador || ""), data_inicio: dataInicio || imp.data_inicio },
+        { transaction: t }
+      );
+    }
+    await ordem.update({ estado: "em_producao", impressao_ok: true }, { transaction: t });
+    await t.commit();
+    const completa = await OrdemProducao.findByPk(ordem.id, { include: includeOrdem() });
+    return res.json(completa);
+  } catch (e) {
+    await t.rollback();
+    console.error("Erro ao libertar para a máquina:", e);
+    return res.status(500).json({ erro: "Erro ao libertar para a máquina" });
+  }
+};
+
 exports.atualizarOrdem = async (req, res) => {
   const t = await sequelize.transaction();
   try {
@@ -335,7 +396,11 @@ exports.salvarImpressao = async (req, res) => {
     const { ordem_producao_id } = req.params;
     const dados = {};
     Object.entries(MAPA_IMP).forEach(([chave, campo]) => {
-      if (req.body[chave] !== undefined && req.body[chave] !== null) dados[campo] = req.body[chave];
+      const v = req.body[chave];
+      if (v !== undefined && v !== null) {
+        if ((campo === "data_inicio" || campo === "data_fim" || campo === "maquina" || campo === "operador") && String(v).trim() === "") return;
+        dados[campo] = v;
+      }
     });
     if (dados.quantidade_produzida !== undefined) dados.quantidade_produzida = parseInt(dados.quantidade_produzida, 10) || 0;
     if (dados.quantidade_rejeitada !== undefined) dados.quantidade_rejeitada = parseInt(dados.quantidade_rejeitada, 10) || 0;

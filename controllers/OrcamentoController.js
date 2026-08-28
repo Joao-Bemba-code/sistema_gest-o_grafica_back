@@ -1,6 +1,7 @@
-const { sequelize, Orcamento, OrcamentoItem, OrcamentoMaterial, OrcamentoServico, Cliente, Sequencia } = require("../models");
+const { sequelize, Orcamento, OrcamentoItem, OrcamentoMaterial, OrcamentoServico, Cliente, Sequencia, OrdemProducao, PreImpressao } = require("../models");
 const { Transaction } = require("sequelize");
 const validador = require("../validators/orcamento");
+const estoqueService = require("../services/estoque");
 
 const ESTADOS = ["pendente", "aprovado", "cancelado", "rejeitado"];
 
@@ -189,6 +190,61 @@ async function proximoNumero(organizacao_id) {
   });
 }
 
+async function criarOrdemProducaoAuto(orcamento, organizacaoId, usuarioId) {
+  const existente = await OrdemProducao.findOne({ where: { orcamento_id: orcamento.id, organizacao_id: organizacaoId } });
+  if (existente) return null;
+
+  const itens = await OrcamentoItem.findAll({ where: { orcamento_id: orcamento.id } });
+  let quantidade = 0;
+  const materiaisMap = new Map();
+  for (const item of itens) {
+    const qtdItem = parseInt(item.quantidade, 10) || 0;
+    quantidade += qtdItem;
+    const mats = await OrcamentoMaterial.findAll({ where: { orcamento_item_id: item.id } });
+    for (const mat of mats) {
+      const mid = Number(mat.material_id);
+      if (!mid) continue;
+      const mover = mat.mover_estoque === true || mat.mover_estoque === 1;
+      if (!mover) continue;
+      const qtd = Number(mat.quantidade) * (qtdItem || 1);
+      materiaisMap.set(mid, (materiaisMap.get(mid) || 0) + qtd);
+    }
+  }
+
+  const produto = orcamento.produto || itens[0]?.descricao || "Produção (orçamento aprovado)";
+  const ordem = await OrdemProducao.create({
+    organizacao_id: organizacaoId,
+    usuario_id: usuarioId,
+    cliente_id: orcamento.cliente_id || null,
+    orcamento_id: orcamento.id,
+    numero: `OP-${new Date().getFullYear()}-${orcamento.id}`,
+    produto,
+    quantidade,
+    data_entrada: new Date().toISOString().split("T")[0],
+    estado: "aguardando",
+    observacoes: `Gerada automaticamente a partir do orçamento ${orcamento.numero}`,
+  });
+  await PreImpressao.create({ organizacao_id: organizacaoId, ordem_producao_id: ordem.id });
+
+  if (materiaisMap.size) {
+    const t = await sequelize.transaction();
+    try {
+      await estoqueService.reservarMateriais({
+        organizacaoId,
+        ordemProducaoId: ordem.id,
+        itens: Array.from(materiaisMap, ([material_id, quantidade]) => ({ material_id, quantidade })),
+        usuarioId,
+        transaction: t,
+      });
+      await t.commit();
+    } catch (erroReserva) {
+      await t.rollback();
+      console.warn(`[OP automática] reserva de materiais falhou (orçamento ${orcamento.numero}):`, erroReserva.message);
+    }
+  }
+  return ordem;
+}
+
 exports.listar = async (req, res) => {
   try {
     const { estado } = req.query;
@@ -250,6 +306,9 @@ exports.criar = async (req, res) => {
     }
     await recalcularTotais(orcamento.id);
     const completo = await Orcamento.findByPk(orcamento.id, { include: includeCompleto() });
+    if (orcamento.estado === "aprovado") {
+      await criarOrdemProducaoAuto(completo, req.organizacao_id, req.usuario.id);
+    }
     return res.status(201).json(serializar(completo));
   } catch (e) {
     console.error("Erro ao criar orçamento:", e);
@@ -266,7 +325,11 @@ exports.atualizar = async (req, res) => {
     if (req.body.estado && !ESTADOS.includes(req.body.estado)) return res.status(422).json({ erro: "Estado inválido" });
     const dados = normalizarDados(req.body);
     delete dados.numero;
+    const estadoAnterior = orcamento.estado;
     await orcamento.update(dados);
+    if (orcamento.estado === "aprovado" && estadoAnterior !== "aprovado") {
+      await criarOrdemProducaoAuto(orcamento, req.organizacao_id, req.usuario.id);
+    }
     if (req.body.itens) {
       const idsItens = (await OrcamentoItem.findAll({ where: { orcamento_id: orcamento.id }, attributes: ["id"] })).map((i) => i.id);
       if (idsItens.length) await OrcamentoMaterial.update({ deleted: 1, deletedAt: new Date() }, { where: { orcamento_item_id: idsItens } });

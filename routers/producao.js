@@ -10,6 +10,7 @@ router.post("/ordens", ProducaoController.criarOrdem);
 router.put("/ordens/:id", ProducaoController.atualizarOrdem);
 router.delete("/ordens/:id", ProducaoController.removerOrdem);
 router.post("/ordens/:id/libertar-materiais", ProducaoController.libertarMateriais);
+router.post("/ordens/:id/libertar-maquina", ProducaoController.libertarParaMaquina);
 
 router.put("/pre-impressao/:ordem_producao_id", ProducaoController.salvarPreImpressao);
 router.put("/impressao/:ordem_producao_id", ProducaoController.salvarImpressao);
