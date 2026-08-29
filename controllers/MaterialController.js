@@ -61,6 +61,7 @@ function normalizarDados(body) {
     if (dados[campo] !== undefined) dados[campo] = parseFloat(dados[campo]) || 0;
   });
   if (dados.controla_lote !== undefined) dados.controla_lote = !!dados.controla_lote;
+  if (dados.mover_estoque !== undefined) dados.mover_estoque = !!dados.mover_estoque;
   if (dados.ativo !== undefined) dados.ativo = !!dados.ativo;
   return dados;
 }
@@ -71,8 +72,10 @@ function serializar(material) {
   const reservado = parseFloat(obj.estoque_reservado) || 0;
   const disponivel = quantidade - reservado;
   const ponto = parseFloat(obj.ponto_ressuprimento || obj.estoque_min) || 0;
+  const mover = obj.mover_estoque !== false;
   let status = "ok";
-  if (disponivel <= 0) status = "esgotado";
+  if (!mover) status = "imobilizado";
+  else if (disponivel <= 0) status = "esgotado";
   else if (disponivel <= ponto) status = "repor";
   const preco_venda = (parseFloat(obj.custo_unit) || 0) * (1 + (parseFloat(obj.lucro) || 0) / 100);
   return {

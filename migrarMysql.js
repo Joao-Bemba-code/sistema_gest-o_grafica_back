@@ -22,6 +22,19 @@ async function aplicarMigracoesMysql(sequelize) {
   await adicionar("material", "especificacoes", "JSON NULL");
   await adicionar("material", "localizacao", "VARCHAR(100) NULL");
   await adicionar("material", "lucro", "DECIMAL(5,2) NULL DEFAULT 0");
+  await adicionar("material", "mover_estoque", "TINYINT(1) NOT NULL DEFAULT 1");
+
+  // Histórico de mudanças de estado das máquinas (JSON: [{estado,data,motivo}])
+  await adicionar("maquina", "historico_estados", "JSON NULL");
+
+  // Equipamentos por defeito não movimentam estoque (permanecem como registo/máquina).
+  await sequelize.query(
+    `UPDATE material m
+     JOIN categoria c ON c.id = m.categoria_id
+     SET m.mover_estoque = 0
+     WHERE c.familia = 'equipamentos' OR c.tipo = 'equipamentos'`
+  );
+  console.log("MIGRAÇÃO: equipamentos passaram a não mover estoque");
   await adicionar("orcamento", "desconto", "DECIMAL(12,2) NULL DEFAULT 0");
   await adicionar("orcamento", "especificacao_json", "JSON NULL");
   await adicionar("orcamento_item", "composto", "TINYINT(1) NOT NULL DEFAULT 0");
@@ -68,6 +81,24 @@ async function aplicarMigracoesMysql(sequelize) {
   }
 
   await adicionar("orcamento_servico", "servico_id", "INT NULL");
+
+  // Cobrança proporcional de folha por encaixe no orçamento (ex.: usar A7 numa A4).
+  await adicionar("orcamento_material", "usar_parcial", "TINYINT(1) NOT NULL DEFAULT 0");
+  await adicionar("orcamento_material", "formato_final", "VARCHAR(50) NULL");
+  await adicionar("orcamento_material", "largura_final", "DECIMAL(8,2) NOT NULL DEFAULT 0");
+  await adicionar("orcamento_material", "altura_final", "DECIMAL(8,2) NOT NULL DEFAULT 0");
+  await adicionar("orcamento_material", "pecas_por_folha", "INT NOT NULL DEFAULT 1");
+  await adicionar("orcamento_material", "preco_folha", "DECIMAL(12,2) NOT NULL DEFAULT 0");
+  await adicionar("orcamento_material", "formato", "VARCHAR(50) NULL");
+  await adicionar("orcamento_material", "largura_mm", "DECIMAL(8,2) NOT NULL DEFAULT 0");
+  await adicionar("orcamento_material", "altura_mm", "DECIMAL(8,2) NOT NULL DEFAULT 0");
+  await adicionar("orcamento_material", "quantidade_folhas", "DECIMAL(12,2) NOT NULL DEFAULT 0");
+  await adicionar("orcamento_material", "tipo_material", "VARCHAR(20) NOT NULL DEFAULT 'material'");
+
+  // Impressão / toner: nº de folhas a imprimir e o material de toner usado.
+  await adicionar("orcamento_item", "folhas_impressao", "INT NOT NULL DEFAULT 0");
+  await adicionar("orcamento_item", "toner_material_id", "INT NULL");
+  await adicionar("orcamento_item", "toner_custo_unit", "DECIMAL(8,4) NOT NULL DEFAULT 0");
 
   const catFamRef = await sequelize.query(
     `SELECT COLUMN_TYPE FROM information_schema.COLUMNS

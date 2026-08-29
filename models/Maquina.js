@@ -45,6 +45,7 @@ const Maquina = sequelize.define("maquina", {
   ultima_manutencao: { type: DataTypes.DATEONLY },
   proxima_manutencao: { type: DataTypes.DATEONLY },
   manutencoes: { type: DataTypes.JSON, defaultValue: [] },
+  historico_estados: { type: DataTypes.JSON, defaultValue: [] },
 
   // 6. Stock
   estoque_min: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },

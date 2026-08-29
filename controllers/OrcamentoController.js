@@ -63,15 +63,28 @@ function normalizarItens(itens) {
       const materiais = (i.materiais || [])
         .map((m) => {
           const qtd = parseFloat(m.quantidade) || 0;
-          const custoUnit = parseFloat(m.custo_unit) || 0;
+          const custoUnit = parseFloat(m.custo_unit != null ? m.custo_unit : m.preco_venda) || 0;
+          const custoTotal = parseFloat(m.custo_total) || (qtd * custoUnit);
+          const quantidadeFolhas = parseFloat(m.quantidade_folhas) || qtd;
           return {
             material_id: m.material_id || null,
             descricao: String(m.descricao || "").trim() || "Material",
             unidade: m.unidade || "un",
             quantidade: qtd,
             custo_unit: custoUnit,
-            custo_total: Number((qtd * custoUnit).toFixed(2)),
+            custo_total: Number(custoTotal.toFixed(2)),
             mover_estoque: Boolean(m.mover_estoque),
+            tipo_material: m.tipo_material || "material",
+            usar_parcial: Boolean(m.usar_parcial),
+            formato_final: m.formato_final || null,
+            largura_final: parseFloat(m.largura_final) || 0,
+            altura_final: parseFloat(m.altura_final) || 0,
+            pecas_por_folha: parseInt(m.pecas_por_folha, 10) || 1,
+            preco_folha: parseFloat(m.preco_folha) || custoUnit,
+            formato: m.formato || null,
+            largura_mm: parseFloat(m.largura_mm) || 0,
+            altura_mm: parseFloat(m.altura_mm) || 0,
+            quantidade_folhas: quantidadeFolhas,
           };
         })
         .filter((m) => m.material_id || m.descricao);
@@ -82,6 +95,9 @@ function normalizarItens(itens) {
         total: parseFloat(i.total) || (quantidade * precoUnit),
         composto: Boolean(i.composto),
         margem: parseFloat(i.margem) || 0,
+        folhas_impressao: parseInt(i.folhas_impressao, 10) || 0,
+        toner_material_id: i.toner_material_id || null,
+        toner_custo_unit: parseFloat(i.toner_custo_unit) || 0,
         materiais,
       };
     })
@@ -119,6 +135,9 @@ function serializar(o) {
     total: Number(i.total) || 0,
     composto: Boolean(i.composto),
     margem: Number(i.margem) || 0,
+    folhas_impressao: Number(i.folhas_impressao) || 0,
+    toner_material_id: i.toner_material_id || null,
+    toner_custo_unit: Number(i.toner_custo_unit) || 0,
     materiais: (i.materiais || []).map((m) => ({
       id: m.id,
       material_id: m.material_id,
@@ -128,6 +147,17 @@ function serializar(o) {
       custo_unit: Number(m.custo_unit) || 0,
       custo_total: Number(m.custo_total) || 0,
       mover_estoque: Boolean(m.mover_estoque),
+      tipo_material: m.tipo_material || "material",
+      usar_parcial: Boolean(m.usar_parcial),
+      formato_final: m.formato_final || "",
+      largura_final: Number(m.largura_final) || 0,
+      altura_final: Number(m.altura_final) || 0,
+      pecas_por_folha: Number(m.pecas_por_folha) || 1,
+      preco_folha: Number(m.preco_folha) || 0,
+      formato: m.formato || "",
+      largura_mm: Number(m.largura_mm) || 0,
+      altura_mm: Number(m.altura_mm) || 0,
+      quantidade_folhas: Number(m.quantidade_folhas) || 0,
     })),
   }));
   const servicos = (o.orcamento_servicos || o.servicos || []).map((s) => ({
@@ -206,7 +236,13 @@ async function criarOrdemProducaoAuto(orcamento, organizacaoId, usuarioId) {
       if (!mid) continue;
       const mover = mat.mover_estoque === true || mat.mover_estoque === 1;
       if (!mover) continue;
-      const qtd = Number(mat.quantidade) * (qtdItem || 1);
+      const ehToner = mat.tipo_material === "toner";
+      const porUnidade = ehToner
+        ? Number(mat.quantidade) || 0
+        : mat.usar_parcial === true || mat.usar_parcial === 1
+          ? Number(mat.quantidade_folhas) || Number(mat.quantidade) || 0
+          : Number(mat.quantidade) || 0;
+      const qtd = porUnidade * (qtdItem || 1);
       materiaisMap.set(mid, (materiaisMap.get(mid) || 0) + qtd);
     }
   }
