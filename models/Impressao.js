@@ -9,6 +9,7 @@ const Impressao = sequelize.define("impressao", {
   operador: { type: DataTypes.STRING(100) },
   data_inicio: { type: DataTypes.STRING(20) },
   data_fim: { type: DataTypes.STRING(20) },
+  tempo_estimado: { type: DataTypes.STRING(20) },
   quantidade_produzida: { type: DataTypes.INTEGER, defaultValue: 0 },
   quantidade_rejeitada: { type: DataTypes.INTEGER, defaultValue: 0 },
   taxa_rejeicao: { type: DataTypes.DECIMAL(5, 2), defaultValue: 0 },

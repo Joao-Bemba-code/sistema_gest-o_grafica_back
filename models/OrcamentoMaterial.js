@@ -22,6 +22,7 @@ const OrcamentoMaterial = sequelize.define("orcamento_material", {
   largura_mm: { type: DataTypes.DECIMAL(8, 2), defaultValue: 0 },
   altura_mm: { type: DataTypes.DECIMAL(8, 2), defaultValue: 0 },
   quantidade_folhas: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
+  quantidade_pecas: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
   deleted: { type: DataTypes.BOOLEAN, defaultValue: false },
   deletedAt: { type: DataTypes.DATE, allowNull: true },
 }, {

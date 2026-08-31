@@ -47,10 +47,19 @@ exports.atualizar = async (req, res) => {
     const dados = { ...req.body };
     const novoEstado = dados.estado;
     const motivoEstado = dados.motivo_estado || "Mudança de estado";
+    const tempoManutencao = dados.tempo_manutencao || dados.tempo_estimado || null;
+    const tecnicoManutencao = dados.tecnico_manutencao || dados.tecnico || null;
     delete dados.motivo_estado;
+    delete dados.tempo_manutencao;
+    delete dados.tecnico_manutencao;
     if (novoEstado && novoEstado !== maquina.estado) {
       const historico = Array.isArray(maquina.historico_estados) ? [...maquina.historico_estados] : [];
-      historico.push({ estado: novoEstado, data: new Date().toISOString(), motivo: motivoEstado });
+      const entrada = { estado: novoEstado, data: new Date().toISOString(), motivo: motivoEstado };
+      if (novoEstado === "manutencao" || novoEstado === "avariada") {
+        if (tempoManutencao) entrada.tempo_estimado = tempoManutencao;
+        if (tecnicoManutencao) entrada.tecnico = tecnicoManutencao;
+      }
+      historico.push(entrada);
       dados.historico_estados = historico;
     }
     await maquina.update(dados);

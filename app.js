@@ -40,6 +40,7 @@ function criarApp(opcoes = {}) {
     app.use(express.json({ limit: "100mb" }));
     app.use("/uploads", express.static(UPLOADS));
     app.use("/api/auth", require("./routers/auth"));
+    app.use("/api/usuarios", require("./routers/usuarios"));
     app.use("/api/clientes", require("./routers/clientes"));
     app.use("/api/materiais", require("./routers/materiais"));
     app.use("/api/orcamentos", require("./routers/orcamentos"));

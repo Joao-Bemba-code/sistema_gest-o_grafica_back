@@ -1,6 +1,7 @@
 const sequelize = require("../config");
 const Organizacao = require("./Organizacao");
 const Usuario = require("./Usuario");
+const LoginLog = require("./LoginLog");
 const Cliente = require("./Cliente");
 const Categoria = require("./Categoria");
 const Material = require("./Material");
@@ -27,6 +28,11 @@ const Maquina = require("./Maquina");
 
 Organizacao.hasMany(Usuario, { foreignKey: "organizacao_id" });
 Usuario.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
+
+Organizacao.hasMany(LoginLog, { foreignKey: "organizacao_id" });
+LoginLog.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
+Usuario.hasMany(LoginLog, { foreignKey: "usuario_id" });
+LoginLog.belongsTo(Usuario, { foreignKey: "usuario_id" });
 
 Organizacao.hasMany(Cliente, { foreignKey: "organizacao_id" });
 Cliente.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
@@ -132,6 +138,7 @@ module.exports = {
   sequelize,
   Organizacao,
   Usuario,
+  LoginLog,
   Cliente,
   Categoria,
   Fornecedor,

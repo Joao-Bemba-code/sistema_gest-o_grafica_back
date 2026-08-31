@@ -30,6 +30,8 @@ const MAPA_IMP = {
   inicio: "data_inicio",
   horaFim: "data_fim",
   fim: "data_fim",
+  tempoEstimado: "tempo_estimado",
+  tempoPrevisto: "tempo_estimado",
   quantidadeProduzida: "quantidade_produzida",
   produzido: "quantidade_produzida",
   quantidadeRejeitada: "quantidade_rejeitada",
@@ -64,6 +66,18 @@ async function podeAvancar(ordemId, organizacaoId, transaction) {
   if (total === 0) return true;
   const op = await OrdemProducao.findByPk(ordemId, { transaction });
   return op?.requisicao_estado === "libertada";
+}
+
+async function registarProcesso(ordemId, processo, dados) {
+  const op = await OrdemProducao.findByPk(ordemId);
+  if (!op) return;
+  const hist = Array.isArray(op.historico_processos) ? [...op.historico_processos] : [];
+  hist.push({
+    processo,
+    ...dados,
+    data: new Date().toISOString(),
+  });
+  await op.update({ historico_processos: hist.slice(-200) });
 }
 
 exports.listarOrdens = async (req, res) => {
@@ -383,6 +397,11 @@ exports.salvarPreImpressao = async (req, res) => {
       } else {
         await op.update({ pre_impressao_ok: false });
       }
+      await registarProcesso(ordem_producao_id, "pre_impressao", {
+        resultado: pre.resultado,
+        responsavel: pre.responsavel || null,
+        observacoes: pre.observacoes || null,
+      });
     }
     return res.json(pre);
   } catch (e) {
@@ -416,6 +435,17 @@ exports.salvarImpressao = async (req, res) => {
     });
     if (!criado) await imp.update(dados);
     await OrdemProducao.update({ impressao_ok: true }, { where: { id: ordem_producao_id } });
+    await registarProcesso(ordem_producao_id, "impressao", {
+      maquina: imp.maquina || null,
+      operador: imp.operador || null,
+      data_inicio: imp.data_inicio || null,
+      data_fim: imp.data_fim || null,
+      tempo_estimado: imp.tempo_estimado || null,
+      quantidade_produzida: imp.quantidade_produzida ?? 0,
+      quantidade_rejeitada: imp.quantidade_rejeitada ?? 0,
+      taxa_rejeicao: imp.taxa_rejeicao ?? 0,
+      observacoes: imp.observacoes || null,
+    });
     return res.json(imp);
   } catch (e) {
     console.error("Erro ao salvar impressão:", e);
@@ -427,12 +457,19 @@ exports.salvarAcabamento = async (req, res) => {
   try {
     const { ordem_producao_id } = req.params;
     const body = req.body || {};
+    const meta = {
+      maquina: body.maquina || null,
+      tempo_estimado: body.tempoEstimado || body.tempo_estimado || null,
+      erros: body.erros != null ? Number(body.erros) || 0 : null,
+      perdas: body.perdas != null ? Number(body.perdas) || 0 : null,
+      observacoes: body.observacoes || null,
+    };
     let servicos = null;
     if (Array.isArray(body.servicos)) {
       servicos = body.servicos;
     } else if (body && typeof body === "object") {
       servicos = Object.entries(body)
-        .filter(([k]) => k !== "entrega" && k !== "responsavel" && k !== "observacoes")
+        .filter(([k]) => k !== "entrega" && k !== "responsavel" && k !== "observacoes" && k !== "maquina" && k !== "tempoEstimado" && k !== "tempo_estimado" && k !== "erros" && k !== "perdas")
         .map(([servico, estado]) => ({ servico, estado: estado || "pendente" }));
     }
     if (servicos && servicos.length) {
@@ -442,10 +479,23 @@ exports.salvarAcabamento = async (req, res) => {
         ordem_producao_id: parseInt(ordem_producao_id, 10),
         servico: s.servico,
         estado: s.estado || "pendente",
+        maquina: meta.maquina,
+        tempo_estimado: meta.tempo_estimado,
+        erros: meta.erros,
+        perdas: meta.perdas,
+        observacoes: meta.observacoes,
       }));
       const criados = await Acabamento.bulkCreate(items);
       const todosConcluidos = criados.length > 0 && criados.every((c) => c.estado === "concluido");
       await OrdemProducao.update({ acabamento_ok: todosConcluidos }, { where: { id: ordem_producao_id } });
+      await registarProcesso(ordem_producao_id, "acabamento", {
+        maquina: meta.maquina,
+        tempo_estimado: meta.tempo_estimado,
+        erros: meta.erros,
+        perdas: meta.perdas,
+        observacoes: meta.observacoes,
+        servicos: Object.fromEntries(items.map((s) => [s.servico, s.estado])),
+      });
       return res.json(criados);
     }
     return res.json([]);
@@ -489,6 +539,15 @@ exports.salvarQualidade = async (req, res) => {
       } else {
         await op.update({ qualidade_ok: false });
       }
+      await registarProcesso(ordem_producao_id, "qualidade", {
+        resultado: qual.resultado,
+        cor: qual.cor,
+        corte: qual.corte,
+        quantidade: qual.quantidade,
+        acabamento: qual.acabamento,
+        embalagem: qual.embalagem,
+        observacoes: qual.observacoes || null,
+      });
     }
     return res.json(qual);
   } catch (e) {

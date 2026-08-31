@@ -66,6 +66,7 @@ function normalizarItens(itens) {
           const custoUnit = parseFloat(m.custo_unit != null ? m.custo_unit : m.preco_venda) || 0;
           const custoTotal = parseFloat(m.custo_total) || (qtd * custoUnit);
           const quantidadeFolhas = parseFloat(m.quantidade_folhas) || qtd;
+          const quantidadePecas = parseFloat(m.quantidade_pecas) || 0;
           return {
             material_id: m.material_id || null,
             descricao: String(m.descricao || "").trim() || "Material",
@@ -85,6 +86,7 @@ function normalizarItens(itens) {
             largura_mm: parseFloat(m.largura_mm) || 0,
             altura_mm: parseFloat(m.altura_mm) || 0,
             quantidade_folhas: quantidadeFolhas,
+            quantidade_pecas: quantidadePecas,
           };
         })
         .filter((m) => m.material_id || m.descricao);
@@ -158,6 +160,7 @@ function serializar(o) {
       largura_mm: Number(m.largura_mm) || 0,
       altura_mm: Number(m.altura_mm) || 0,
       quantidade_folhas: Number(m.quantidade_folhas) || 0,
+      quantidade_pecas: Number(m.quantidade_pecas) || 0,
     })),
   }));
   const servicos = (o.orcamento_servicos || o.servicos || []).map((s) => ({

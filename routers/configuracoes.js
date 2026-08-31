@@ -3,6 +3,7 @@ const multer = require("multer");
 const path = require("path");
 const Controller = require("../controllers/ConfiguracoesController");
 const auth = require("../protect/auth");
+const requirePermissao = require("../protect/perm");
 
 const UPLOADS = process.env.SIGRAF_UPLOADS || path.join(__dirname, "..", "uploads");
 
@@ -26,15 +27,15 @@ const upload = multer({
 router.use(auth);
 
 router.get("/organizacao", Controller.buscarOrganizacao);
-router.put("/organizacao", Controller.guardarOrganizacao);
+router.put("/organizacao", requirePermissao("configuracao", "editar"), Controller.guardarOrganizacao);
 
-router.get("/sistema", Controller.buscarSistema);
-router.put("/sistema", Controller.guardarSistema);
+router.get("/sistema", requirePermissao("configuracao", "ver"), Controller.buscarSistema);
+router.put("/sistema", requirePermissao("configuracao", "editar"), Controller.guardarSistema);
 
-router.get("/seguranca", Controller.buscarSeguranca);
-router.put("/seguranca", Controller.guardarSeguranca);
+router.get("/seguranca", requirePermissao("configuracao", "ver"), Controller.buscarSeguranca);
+router.put("/seguranca", requirePermissao("configuracao", "editar"), Controller.guardarSeguranca);
 
-router.post("/logo", (req, res) => {
+router.post("/logo", requirePermissao("configuracao", "editar"), (req, res) => {
   upload.single("logo")(req, res, (err) => {
     if (err) {
       if (err.code === "LIMIT_FILE_SIZE") {

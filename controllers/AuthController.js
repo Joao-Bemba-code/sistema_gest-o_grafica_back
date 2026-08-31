@@ -2,6 +2,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { Usuario, Organizacao } = require("../models");
 const { registarFalha, limparFalhas } = require("../protect/loginLimit");
+const loginLog = require("../services/loginLog");
 
 exports.login = async (req, res) => {
   try {
@@ -9,23 +10,50 @@ exports.login = async (req, res) => {
     if (!email || !senha) {
       return res.status(422).json({ erro: "Email e senha são obrigatórios" });
     }
+    const ip = req.ip;
+    const userAgent = req.headers?.["user-agent"] || null;
     const usuario = await Usuario.findOne({ where: { email }, include: [Organizacao] });
     if (!usuario) {
       registarFalha(req);
+      await loginLog.registrar({ email, sucesso: false, ip, user_agent: userAgent });
       return res.status(401).json({ erro: "Credenciais inválidas" });
     }
     if (!usuario.ativo) {
       registarFalha(req);
+      await loginLog.registrar({
+        organizacao_id: usuario.organizacao_id,
+        usuario_id: usuario.id,
+        email,
+        sucesso: false,
+        ip,
+        user_agent: userAgent,
+      });
       return res.status(401).json({ erro: "Usuário inativo" });
     }
     const senhaOk = await bcrypt.compare(senha, usuario.senha);
     if (!senhaOk) {
       registarFalha(req);
+      await loginLog.registrar({
+        organizacao_id: usuario.organizacao_id,
+        usuario_id: usuario.id,
+        email,
+        sucesso: false,
+        ip,
+        user_agent: userAgent,
+      });
       return res.status(401).json({ erro: "Credenciais inválidas" });
     }
     limparFalhas(req);
+    await loginLog.registrar({
+      organizacao_id: usuario.organizacao_id,
+      usuario_id: usuario.id,
+      email,
+      sucesso: true,
+      ip,
+      user_agent: userAgent,
+    });
     const token = jwt.sign(
-      { id: usuario.id, organizacao_id: usuario.organizacao_id, funcao: usuario.funcao },
+      { id: usuario.id, organizacao_id: usuario.organizacao_id, funcao: usuario.funcao, perfil: usuario.perfil },
       process.env.SECRET,
       { expiresIn: "8h" }
     );
@@ -64,8 +92,17 @@ exports.registrar = async (req, res) => {
       email,
       senha: hash,
       funcao: "admin",
+      perfil: "admin",
     });
     const { senha: _, ...dadosUsuario } = usuario.toJSON();
+    await loginLog.registrar({
+      organizacao_id: organizacao.id,
+      usuario_id: usuario.id,
+      email,
+      sucesso: true,
+      ip: req.ip,
+      user_agent: req.headers?.["user-agent"] || null,
+    });
     return res.status(201).json({ mensagem: "Conta criada com sucesso", usuario: dadosUsuario });
   } catch (e) {
     return res.status(500).json({ erro: "Erro interno no servidor" });

@@ -12,6 +12,9 @@ const Organizacao = sequelize.define("organizacao", {
   website: { type: DataTypes.STRING(500) },
   template_contrato: { type: DataTypes.TEXT },
   logo_url: { type: DataTypes.STRING(500) },
+  banco_nome: { type: DataTypes.STRING(150) },
+  banco_iban: { type: DataTypes.STRING(50) },
+  banco_conta: { type: DataTypes.STRING(50) },
   ativo: { type: DataTypes.BOOLEAN, defaultValue: true },
 });
 

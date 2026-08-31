@@ -24,6 +24,11 @@ async function aplicarMigracoesMysql(sequelize) {
   await adicionar("material", "lucro", "DECIMAL(5,2) NULL DEFAULT 0");
   await adicionar("material", "mover_estoque", "TINYINT(1) NOT NULL DEFAULT 1");
 
+  // Dados bancários da organização impressos nos PDFs (orçamentos e faturas).
+  await adicionar("organizacao", "banco_nome", "VARCHAR(150) NULL");
+  await adicionar("organizacao", "banco_iban", "VARCHAR(50) NULL");
+  await adicionar("organizacao", "banco_conta", "VARCHAR(50) NULL");
+
   // Histórico de mudanças de estado das máquinas (JSON: [{estado,data,motivo}])
   await adicionar("maquina", "historico_estados", "JSON NULL");
 
@@ -67,6 +72,29 @@ async function aplicarMigracoesMysql(sequelize) {
     await adicionar(t, "deletedAt", "DATETIME NULL");
   }
 
+  // Máquina usada, erros e perdas registados no processo de acabamento.
+  await adicionar("acabamento", "maquina", "VARCHAR(100) NULL");
+  await adicionar("acabamento", "erros", "INT NOT NULL DEFAULT 0");
+  await adicionar("acabamento", "perdas", "INT NOT NULL DEFAULT 0");
+  await adicionar("acabamento", "tempo_estimado", "VARCHAR(20) NULL");
+  await adicionar("impressao", "tempo_estimado", "VARCHAR(20) NULL");
+
+  // Controlo de acesso: perfil (papel) e permissões por utilizador.
+  await adicionar("usuario", "perfil", "VARCHAR(50) NULL");
+  await adicionar("usuario", "permissoes", "JSON NULL");
+
+  // Utilizadores já existentes mantêm acesso total (perfil administrador) para
+  // não bloquear ninguém na primeira migração; o admin ajusta depois os perfis.
+  await sequelize.query(`UPDATE usuario SET perfil = 'admin' WHERE perfil IS NULL OR perfil = ''`);
+  console.log("MIGRAÇÃO: utilizadores existentes passaram a perfil 'admin'");
+
+  // Auditoria de acessos: registo de tentativas de login (sucesso/falha) e dados
+  // do dispositivo/IP de onde foi feito o acesso. A tabela é criada pela sync().
+  await adicionar("login_log", "user_agent", "VARCHAR(500) NULL");
+
+  // Histórico de processos/operações registados por ordem de produção.
+  await adicionar("ordem_producao", "historico_processos", "JSON NULL");
+
   const refs = await sequelize.query(
     `SELECT COLUMN_TYPE FROM information_schema.COLUMNS
      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'movimento_estoque' AND COLUMN_NAME = 'referencia_tipo'`,
@@ -93,6 +121,7 @@ async function aplicarMigracoesMysql(sequelize) {
   await adicionar("orcamento_material", "largura_mm", "DECIMAL(8,2) NOT NULL DEFAULT 0");
   await adicionar("orcamento_material", "altura_mm", "DECIMAL(8,2) NOT NULL DEFAULT 0");
   await adicionar("orcamento_material", "quantidade_folhas", "DECIMAL(12,2) NOT NULL DEFAULT 0");
+  await adicionar("orcamento_material", "quantidade_pecas", "DECIMAL(12,2) NOT NULL DEFAULT 0");
   await adicionar("orcamento_material", "tipo_material", "VARCHAR(20) NOT NULL DEFAULT 'material'");
 
   // Impressão / toner: nº de folhas a imprimir e o material de toner usado.

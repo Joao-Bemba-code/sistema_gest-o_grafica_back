@@ -12,10 +12,10 @@ exports.buscarOrganizacao = async (req, res) => {
 
 exports.guardarOrganizacao = async (req, res) => {
   try {
-    const { nome, nif, email, telefone, endereco, website, sigla, template_contrato } = req.body;
+    const { nome, nif, email, telefone, endereco, website, sigla, template_contrato, banco_nome, banco_iban, banco_conta } = req.body;
     const org = await Organizacao.findByPk(req.organizacao_id);
     if (!org) return res.status(404).json({ erro: "Organização não encontrada" });
-    await org.update({ nome, nif, email, telefone, endereco, website, sigla, template_contrato });
+    await org.update({ nome, nif, email, telefone, endereco, website, sigla, template_contrato, banco_nome, banco_iban, banco_conta });
     return res.json(org);
   } catch (e) {
     return res.status(500).json({ erro: "Erro ao guardar organização" });
