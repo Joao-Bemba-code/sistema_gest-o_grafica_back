@@ -260,9 +260,9 @@ async function aplicarMigracoesMysql(sequelize) {
       }
     }
   };
-  await addContaColumnIfMissing("tesouraria_movimentos", "metodo_pagamento", "VARCHAR(50) NULL");
+  await addContaColumnIfMissing("tesouraria_movimento", "metodo_pagamento", "VARCHAR(50) NULL");
   const tesCr = await sequelize.query(
-    "SELECT COUNT(*) AS c FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('contas_bancarias','tesouraria_movimentos')",
+    "SELECT COUNT(*) AS c FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('conta_bancaria','tesouraria_movimento')",
     { type: sequelize.QueryTypes.SELECT }
   );
   console.log(

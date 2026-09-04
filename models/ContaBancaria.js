@@ -23,7 +23,6 @@ const ContaBancaria = sequelize.define("conta_bancaria", {
   deleted: { type: DataTypes.BOOLEAN, defaultValue: false },
   deletedAt: { type: DataTypes.DATE, allowNull: true },
 }, {
-  tableName: "contas_bancarias",
   defaultScope: { where: { deleted: false } },
 });
 

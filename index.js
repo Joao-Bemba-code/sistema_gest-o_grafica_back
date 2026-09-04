@@ -13,7 +13,7 @@ app.use((err, req, res, next) => {
 const PORTA = process.env.port || 8000;
 
 sequelize
-  .sync()
+  .sync({ alter: true })
   .then(async () => {
     if ((process.env.Lang || "mysql").toLowerCase() !== "sqlite") {
       const { aplicarMigracoesMysql } = require("./migrarMysql");
