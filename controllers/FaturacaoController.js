@@ -1,7 +1,65 @@
-const { Faturacao, Cliente, Orcamento, OrcamentoItem, OrdemProducao } = require("../models");
+const { Faturacao, Cliente, Orcamento, OrcamentoItem, OrdemProducao, TesourariaMovimento, ContaBancaria } = require("../models");
 
 const ESTADOS = ["emitida", "paga", "parcial", "vencida", "cancelada"];
 const TIPOS = ["fatura", "recibo", "proforma", "nota_credito", "factura_recibo"];
+
+// Tipos de documento que representam recebimento de dinheiro (geram entrada automática).
+const TIPOS_ENTRADA = ["fatura", "recibo", "factura_recibo"];
+
+/**
+ * Regista automaticamente a ENTRADA de tesouraria quando uma fatura/recibo é
+ * liquidada (paga). As saídas e transferências são sempre manuais.
+ * Evita duplicados: só cria se ainda não existir um movimento de entrada ligado
+ * à fatura. Devolve true se criar, false caso contrário.
+ */
+async function registarEntradaTesouraria(req, fatura, valorPago, metodo, contaId) {
+  try {
+    if (!fatura || !fatura.id) return false;
+    if (!TIPOS_ENTRADA.includes(fatura.tipo)) return false;
+    const valor = parseFloat(valorPago);
+    if (!valor || valor <= 0) return false;
+
+    const existente = await TesourariaMovimento.findOne({
+      where: { fatura_id: fatura.id, tipo: "entrada", organizacao_id: req.organizacao_id },
+    });
+    if (existente) return false;
+
+    const numero = fatura.numero || `#${fatura.id}`;
+    const rotulo = fatura.tipo === "factura_recibo" ? "Factura Recibo" : fatura.tipo === "recibo" ? "Recibo" : "Fatura";
+
+    const movimento = await TesourariaMovimento.create({
+      organizacao_id: req.organizacao_id,
+      usuario_id: req.usuario.id,
+      tipo: "entrada",
+      categoria: "venda",
+      descricao: `Pagamento ${rotulo} ${numero}`,
+      valor,
+      data_movimento: fatura.data_pagamento || new Date().toISOString().split("T")[0],
+      hora_movimento: new Date().toTimeString().split(" ")[0],
+      referencia: numero,
+      referencia_tipo: fatura.tipo === "factura_recibo" ? "recibo" : "fatura",
+      referencia_id: fatura.id,
+      cliente_id: fatura.cliente_id || null,
+      fatura_id: fatura.id,
+      conta_bancaria_id: contaId || fatura.conta_bancaria_id || null,
+      metodo_pagamento: metodo || fatura.metodo_pagamento || null,
+      estado: "confirmado",
+      observacoes: "Entrada automática gerada pela liquidação da fatura",
+    });
+
+    if (movimento.conta_bancaria_id) {
+      const conta = await ContaBancaria.findByPk(movimento.conta_bancaria_id);
+      if (conta) {
+        const novoSaldo = Number(conta.saldo_atual) + valor;
+        await conta.update({ saldo_atual: Number(novoSaldo.toFixed(2)) });
+      }
+    }
+    return true;
+  } catch (e) {
+    console.error("Erro ao registar entrada automática de tesouraria:", e);
+    return false;
+  }
+}
 
 function resolverClienteId(body) {
   if (body.cliente_id) return body.cliente_id;
@@ -155,8 +213,12 @@ async function criarRegisto(req, body) {
     valor_pago: valorPago,
     estado,
     metodo_pagamento: body.metodo || body.metodo_pagamento || null,
+    conta_bancaria_id: body.conta_bancaria_id || null,
     observacoes: body.observacoes || null,
   });
+  if (estado === "paga" && valorPago > 0) {
+    await registarEntradaTesouraria(req, { ...fatura.toJSON(), data_pagamento: fatura.data_pagamento }, valorPago, fatura.metodo_pagamento, fatura.conta_bancaria_id);
+  }
   return Faturacao.findByPk(fatura.id, { include: [{ model: Cliente, required: false }, { model: Orcamento, required: false }, { model: OrdemProducao, required: false }] });
 }
 
@@ -220,6 +282,11 @@ exports.atualizar = async (req, res) => {
       dados.estado = vp >= total ? "paga" : vp > 0 ? "parcial" : "emitida";
     }
     await fatura.update(dados);
+    const estadoPos = dados.estado !== undefined ? dados.estado : fatura.estado;
+    const valorPos = dados.valor_pago !== undefined ? parseFloat(dados.valor_pago) || 0 : parseFloat(fatura.valor_pago) || 0;
+    if (estadoPos === "paga" && valorPos > 0) {
+      await registarEntradaTesouraria(req, { ...fatura.toJSON(), data_pagamento: dados.data_pagamento || fatura.data_pagamento }, valorPos, dados.metodo_pagamento || dados.metodo || fatura.metodo_pagamento, dados.conta_bancaria_id || fatura.conta_bancaria_id);
+    }
     const completa = await Faturacao.findByPk(fatura.id, { include: [{ model: Cliente, required: false }, { model: Orcamento, required: false }, { model: OrdemProducao, required: false }] });
     return res.json(completa);
   } catch (e) {
@@ -246,7 +313,17 @@ exports.marcarPaga = async (req, res) => {
       estado: valorPago >= total ? "paga" : "parcial",
       metodo_pagamento: body.metodo || body.metodo_pagamento || fatura.metodo_pagamento,
       data_pagamento: body.data_pagamento || new Date().toISOString().split("T")[0],
+      conta_bancaria_id: body.conta_bancaria_id || body.conta || fatura.conta_bancaria_id,
     });
+    if (valorPago >= total) {
+      await registarEntradaTesouraria(
+        req,
+        { ...fatura.toJSON(), data_pagamento: body.data_pagamento || fatura.data_pagamento },
+        valorPago,
+        body.metodo || body.metodo_pagamento || fatura.metodo_pagamento,
+        body.conta_bancaria_id || body.conta || fatura.conta_bancaria_id
+      );
+    }
     const completa = await Faturacao.findByPk(fatura.id, { include: [{ model: Cliente, required: false }, { model: Orcamento, required: false }, { model: OrdemProducao, required: false }] });
     return res.json(completa);
   } catch (e) {

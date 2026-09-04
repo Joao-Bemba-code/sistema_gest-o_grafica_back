@@ -25,6 +25,9 @@ const PedidoItem = require("./PedidoItem");
 const OrcamentoServico = require("./OrcamentoServico");
 const Servico = require("./Servico");
 const Maquina = require("./Maquina");
+const Notificacao = require("./Notificacao");
+const ContaBancaria = require("./ContaBancaria");
+const TesourariaMovimento = require("./TesourariaMovimento");
 
 Organizacao.hasMany(Usuario, { foreignKey: "organizacao_id" });
 Usuario.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
@@ -134,6 +137,26 @@ PedidoItem.belongsTo(Pedido, { foreignKey: "pedido_id" });
 Material.hasMany(PedidoItem, { foreignKey: "material_id" });
 PedidoItem.belongsTo(Material, { foreignKey: "material_id" });
 
+Organizacao.hasMany(Notificacao, { foreignKey: "organizacao_id" });
+Notificacao.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
+
+Organizacao.hasMany(ContaBancaria, { foreignKey: "organizacao_id" });
+ContaBancaria.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
+
+Organizacao.hasMany(TesourariaMovimento, { foreignKey: "organizacao_id" });
+TesourariaMovimento.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
+ContaBancaria.hasMany(TesourariaMovimento, { foreignKey: "conta_bancaria_id", as: "movimentos" });
+TesourariaMovimento.belongsTo(ContaBancaria, { foreignKey: "conta_bancaria_id", as: "conta" });
+Cliente.hasMany(TesourariaMovimento, { foreignKey: "cliente_id" });
+TesourariaMovimento.belongsTo(Cliente, { foreignKey: "cliente_id", as: "cliente" });
+Faturacao.hasMany(TesourariaMovimento, { foreignKey: "fatura_id" });
+TesourariaMovimento.belongsTo(Faturacao, { foreignKey: "fatura_id", as: "fatura" });
+TesourariaMovimento.belongsTo(ContaBancaria, { foreignKey: "conta_destino_id", as: "contaDestino" });
+Usuario.hasMany(TesourariaMovimento, { foreignKey: "usuario_id" });
+TesourariaMovimento.belongsTo(Usuario, { foreignKey: "usuario_id", as: "usuario" });
+Usuario.hasMany(TesourariaMovimento, { foreignKey: "aprovado_por", as: "aprovacoes" });
+TesourariaMovimento.belongsTo(Usuario, { foreignKey: "aprovado_por", as: "aprovador" });
+
 module.exports = {
   sequelize,
   Organizacao,
@@ -162,4 +185,7 @@ module.exports = {
   Pedido,
   PedidoItem,
   Maquina,
+  Notificacao,
+  ContaBancaria,
+  TesourariaMovimento,
 };

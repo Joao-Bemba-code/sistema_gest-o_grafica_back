@@ -1,5 +1,6 @@
 const { sequelize, OrdemProducao, PreImpressao, Impressao, Acabamento, Qualidade, Cliente, Orcamento, ReservaEstoque, Maquina } = require("../models");
 const estoqueService = require("../services/estoque");
+const notificacoesService = require("../services/notificacoes");
 
 const ESTADOS_ORDEM = ["aguardando", "em_producao", "finalizado", "entregue"];
 
@@ -163,7 +164,7 @@ exports.criarOrdem = async (req, res) => {
   }
 };
 
-exports.libertarMateriais = async (req, res) => {
+exports.requisitarMateriais = async (req, res) => {
   const t = await sequelize.transaction();
   try {
     const ordem = await OrdemProducao.findOne({
@@ -175,9 +176,9 @@ exports.libertarMateriais = async (req, res) => {
       await t.rollback();
       return res.status(404).json({ erro: "Ordem não encontrada" });
     }
-    if (ordem.requisicao_estado === "libertada") {
+    if (["requisitada", "libertada"].includes(ordem.requisicao_estado)) {
       await t.rollback();
-      return res.json({ mensagem: "Materiais já foram libertados", ordem: await OrdemProducao.findByPk(ordem.id, { include: includeOrdem() }) });
+      return res.status(422).json({ erro: "Esta OP já tem uma requisição registada" });
     }
     const b = req.body || {};
     const existentes = await ReservaEstoque.findAll({
@@ -208,24 +209,80 @@ exports.libertarMateriais = async (req, res) => {
         });
       }
     }
+    await ordem.update({
+      requisicao_estado: "requisitada",
+      solicitado_por: b.solicitado_por || ordem.solicitado_por,
+      observacoes_requisicao: b.observacoes || ordem.observacoes_requisicao,
+    }, { transaction: t });
+    await t.commit();
+    notificacoesService.criar({
+      organizacaoId: req.organizacao_id,
+      tipo: "producao",
+      nivel: "warning",
+      icone: "pending_actions",
+      titulo: `Requisição de material pendente de aprovação — OP ${ordem.numero || ordem.id}`,
+      descricao: `${ordem.cliente?.nome ? `Cliente: ${ordem.cliente.nome} · ` : ""}${ordem.produto || "Produção"} (${ordem.quantidade}) — aguarda autorização no estoque.`,
+      link: "/producao/ordens",
+      usuarioId: req.usuario.id,
+    });
+    const completa = await OrdemProducao.findByPk(ordem.id, { include: includeOrdem() });
+    return res.status(201).json(completa);
+  } catch (e) {
+    await t.rollback();
+    console.error("Erro ao requisitar materiais:", e);
+    return res.status(500).json({ erro: "Erro ao requisitar materiais" });
+  }
+};
+
+exports.aprovarMateriais = async (req, res) => {
+  const t = await sequelize.transaction();
+  try {
+    const ordem = await OrdemProducao.findOne({
+      where: { id: req.params.id, organizacao_id: req.organizacao_id },
+      include: [{ model: Cliente, required: false }],
+      transaction: t,
+    });
+    if (!ordem) {
+      await t.rollback();
+      return res.status(404).json({ erro: "Ordem não encontrada" });
+    }
+    if (ordem.requisicao_estado === "libertada") {
+      await t.rollback();
+      return res.json({ mensagem: "Materiais já foram libertados", ordem: await OrdemProducao.findByPk(ordem.id, { include: includeOrdem() }) });
+    }
+    if (ordem.requisicao_estado !== "requisitada") {
+      await t.rollback();
+      return res.status(422).json({ erro: "A requisição desta OP ainda não foi submetida. A produção deve primeiro submeter a requisição dos materiais." });
+    }
+    const b = req.body || {};
     await estoqueService.baixarReservas({
       organizacaoId: req.organizacao_id,
       ordemProducaoId: ordem.id,
       transaction: t,
       motivo: b.motivo || `Saída para produção — ${ordem.numero}`,
-      solicitadoPor: b.solicitado_por,
+      solicitadoPor: ordem.solicitado_por || b.solicitado_por,
       permitidoPor: b.permitido_por,
-      observacoes: b.observacoes,
+      observacoes: b.observacoes || ordem.observacoes_requisicao,
       clienteNome: ordem.cliente?.nome || null,
     });
-    await ordem.update({ requisicao_estado: "libertada" }, { transaction: t });
+    await ordem.update({ requisicao_estado: "libertada", permitido_por: b.permitido_por || ordem.permitido_por }, { transaction: t });
     await t.commit();
+    notificacoesService.criar({
+      organizacaoId: req.organizacao_id,
+      tipo: "producao",
+      nivel: "success",
+      icone: "inventory",
+      titulo: `Requisição de material aprovada — OP ${ordem.numero || ordem.id}`,
+      descricao: `${ordem.cliente?.nome ? `Cliente: ${ordem.cliente.nome} · ` : ""}${ordem.produto || "Produção"} (${ordem.quantidade}) — saída de stock registada.`,
+      link: "/producao/ordens",
+      usuarioId: req.usuario.id,
+    });
     const completa = await OrdemProducao.findByPk(ordem.id, { include: includeOrdem() });
     return res.json(completa);
   } catch (e) {
     await t.rollback();
-    console.error("Erro ao libertar materiais:", e);
-    return res.status(500).json({ erro: "Erro ao libertar materiais" });
+    console.error("Erro ao aprovar materiais:", e);
+    return res.status(500).json({ erro: "Erro ao aprovar materiais" });
   }
 };
 

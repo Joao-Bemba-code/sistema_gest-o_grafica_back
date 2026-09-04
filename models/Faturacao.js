@@ -27,6 +27,7 @@ const Faturacao = sequelize.define("faturacao", {
     defaultValue: "emitida",
   },
   metodo_pagamento: { type: DataTypes.STRING(50) },
+  conta_bancaria_id: { type: DataTypes.INTEGER },
   observacoes: { type: DataTypes.TEXT },
   usuario_id: { type: DataTypes.INTEGER },
   deleted: { type: DataTypes.BOOLEAN, defaultValue: false },

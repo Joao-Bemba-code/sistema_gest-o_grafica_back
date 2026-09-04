@@ -209,6 +209,67 @@ async function aplicarMigracoesMysql(sequelize) {
       } else throw e;
     }
   }
+
+  // Requisição de materiais em duas fases: produção submete (requisitada) e
+  // a gestão/admin aprova (libertada). Adiciona o estado 'requisitada' ao ENUM.
+  const reqEstRef = await sequelize.query(
+    "SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ordem_producao' AND COLUMN_NAME = 'requisicao_estado'",
+    { type: sequelize.QueryTypes.SELECT }
+  );
+  if (reqEstRef.length && !reqEstRef[0].COLUMN_TYPE.includes("requisitada")) {
+    try {
+      await sequelize.query("SET SESSION sql_mode = 'NO_ENGINE_SUBSTITUTION'");
+      await sequelize.query(
+        "ALTER TABLE `ordem_producao` MODIFY `requisicao_estado` ENUM('pendente','requisitada','libertada') NOT NULL DEFAULT 'pendente'"
+      );
+      console.log("MIGRAÇÃO: ordem_producao.requisicao_estado inclui 'requisitada'");
+    } catch (e) {
+      if (e.code === "WARN_DATA_TRUNCATED" || e.parent?.code === "WARN_DATA_TRUNCATED") {
+        console.log("MIGRAÇÃO: ordem_producao.requisicao_estado actualizado");
+      } else throw e;
+    }
+  }
+
+  // Dados da requisição de materiais retidos na ordem de produção.
+  await adicionar("ordem_producao", "solicitado_por", "VARCHAR(200) NULL");
+  await adicionar("ordem_producao", "permitido_por", "VARCHAR(200) NULL");
+  await adicionar("ordem_producao", "observacoes_requisicao", "TEXT NULL");
+
+  // ============================================================
+  // TESOURARIA + CONTAS BANCÁRIAS
+  // As tabelas (conta_bancaria, tesouraria_movimento) são criadas pelo
+  // sequelize.sync() no arranque; aqui garantimos colunas/fks extra se faltarem.
+  // ============================================================
+
+  // Conta bancária associada à fatura (onde o pagamento foi recebido).
+  await adicionar("faturacao", "conta_bancaria_id", "INT NULL");
+
+  // Colunas de conveniência da tesouraria (evitam depender só do sync).
+  const addContaColumnIfMissing = async (tab, col, def) => {
+    const cols = await sequelize.query(
+      `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '${tab}' AND COLUMN_NAME = '${col}'`,
+      { type: sequelize.QueryTypes.SELECT }
+    );
+    if (!cols.length) {
+      try {
+        await sequelize.query(`ALTER TABLE \`${tab}\` ADD COLUMN \`${col}\` ${def}`);
+        console.log(`MIGRAÇÃO: ${tab}.${col} adicionada (tesouraria)`);
+      } catch (e) {
+        console.log(`MIGRAÇÃO: ${tab}.${col} — ${e.message}`);
+      }
+    }
+  };
+  await addContaColumnIfMissing("tesouraria_movimento", "metodo_pagamento", "VARCHAR(50) NULL");
+  const tesCr = await sequelize.query(
+    "SELECT COUNT(*) AS c FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('conta_bancaria','tesouraria_movimento')",
+    { type: sequelize.QueryTypes.SELECT }
+  );
+  console.log(
+    `MIGRAÇÃO: tabelas tesouraria presentes: ${tesCr[0]?.c ?? 0}/2` +
+      (tesCr[0]?.c === 2 ? " (prontas)" : " (criadas automaticamente pelo sync)")
+  );
 }
+
 
 module.exports = { aplicarMigracoesMysql };

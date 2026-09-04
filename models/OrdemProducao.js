@@ -16,7 +16,7 @@ const OrdemProducao = sequelize.define("ordem_producao", {
     defaultValue: "aguardando",
   },
   requisicao_estado: {
-    type: DataTypes.ENUM("pendente", "libertada"),
+    type: DataTypes.ENUM("pendente", "requisitada", "libertada"),
     defaultValue: "pendente",
   },
   progresso: { type: DataTypes.INTEGER, defaultValue: 0 },
@@ -26,6 +26,9 @@ const OrdemProducao = sequelize.define("ordem_producao", {
   qualidade_ok: { type: DataTypes.BOOLEAN, defaultValue: false },
   entrega_ok: { type: DataTypes.BOOLEAN, defaultValue: false },
   observacoes: { type: DataTypes.TEXT },
+  solicitado_por: { type: DataTypes.STRING(200) },
+  permitido_por: { type: DataTypes.STRING(200) },
+  observacoes_requisicao: { type: DataTypes.TEXT },
   historico_processos: { type: DataTypes.JSON, defaultValue: [] },
   usuario_id: { type: DataTypes.INTEGER },
   deleted: { type: DataTypes.BOOLEAN, defaultValue: false },

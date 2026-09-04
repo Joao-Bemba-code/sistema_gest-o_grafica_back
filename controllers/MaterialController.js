@@ -76,6 +76,7 @@ function serializar(material) {
   let status = "ok";
   if (!mover) status = "imobilizado";
   else if (disponivel <= 0) status = "esgotado";
+  else if (disponivel <= ponto * 0.5) status = "critico";
   else if (disponivel <= ponto) status = "repor";
   const preco_venda = (parseFloat(obj.custo_unit) || 0) * (1 + (parseFloat(obj.lucro) || 0) / 100);
   return {

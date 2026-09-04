@@ -34,7 +34,7 @@ const PERFIS = {
       estoque: { ver: true, criar: true, editar: true, eliminar: true, aprovar: true },
       maquinas: { ver: true, criar: true, editar: true, eliminar: true, aprovar: true },
       categorias: { ver: true, criar: true, editar: true, eliminar: true, aprovar: true },
-      producao: { ver: false, criar: false, editar: false, eliminar: false, aprovar: false },
+      producao: { ver: true, criar: false, editar: true, eliminar: false, aprovar: true },
       relatorios: { ver: false, criar: false, editar: false, eliminar: false, aprovar: false },
       configuracao: { ver: false, criar: false, editar: false, eliminar: false, aprovar: false },
       utilizadores: { ver: false, criar: false, editar: false, eliminar: false, aprovar: false },
