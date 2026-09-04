@@ -43,6 +43,7 @@ const TesourariaMovimento = sequelize.define("tesouraria_movimento", {
   deleted: { type: DataTypes.BOOLEAN, defaultValue: false },
   deletedAt: { type: DataTypes.DATE, allowNull: true },
 }, {
+  tableName: "tesouraria_movimentos",
   defaultScope: { where: { deleted: false } },
 });
 
