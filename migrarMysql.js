@@ -129,34 +129,11 @@ async function aplicarMigracoesMysql(sequelize) {
   await adicionar("orcamento_item", "toner_material_id", "INT NULL");
   await adicionar("orcamento_item", "toner_custo_unit", "DECIMAL(8,4) NOT NULL DEFAULT 0");
 
-  const catFamRef = await sequelize.query(
-    `SELECT COLUMN_TYPE FROM information_schema.COLUMNS
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'categoria' AND COLUMN_NAME = 'familia'`,
-    { type: sequelize.QueryTypes.SELECT }
-  );
-  if (catFamRef.length && !catFamRef[0].COLUMN_TYPE.includes("impressao")) {
-    await sequelize.query(
-      `UPDATE categoria SET familia = 'papeis' WHERE familia IS NULL OR familia = ''`
-    );
-    try {
-      await sequelize.query(`SET SESSION sql_mode = 'NO_ENGINE_SUBSTITUTION'`);
-      await sequelize.query(
-        `ALTER TABLE \`categoria\` MODIFY \`familia\`
-         ENUM('papeis','tintas','chapas','produto_quimico','equipamentos','ferramentas','suporte_especial','material_acabamento','consumiveis','impressao','acabamento','pre_impressao','design','montagem','logistica','consultoria','manutencao','servicos_gerais') NOT NULL DEFAULT 'papeis'`
-      );
-      console.log("MIGRAÇÃO: categoria.familia inclui famílias de serviços");
-    } catch (e) {
-      if (e.code === "WARN_DATA_TRUNCATED" || e.parent?.code === "WARN_DATA_TRUNCATED") {
-        console.log("MIGRAÇÃO: categoria.familia actualizado (warnings ignorados)");
-      } else {
-        throw e;
-      }
-    }
-  }
-
   // Campo Família do Novo Recurso passou a ser editável (permite criar novas
   // famílias em texto livre). Deixa de ser ENUM de valores fixos para aceitar
-  // qualquer família nova escrita pelo utilizador em produção.
+  // qualquer família nova escrita pelo utilizador em produção. Nunca re-criar
+  // o ENUM: isso bloqueia criar categorias com famílias novas (erro
+  // "Data truncated for column 'familia'").
   const catFamEnum = await sequelize.query(
     "SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'categoria' AND COLUMN_NAME = 'familia'",
     { type: sequelize.QueryTypes.SELECT }

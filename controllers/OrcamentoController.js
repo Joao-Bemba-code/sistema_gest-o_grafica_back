@@ -111,14 +111,23 @@ function normalizarServicos(servicos) {
     .map((s) => {
       const mob = parseInt(s.mob, 10) || 1;
       const prazoExecucao = parseInt(s.prazoExecucao || s.prazo_execucao, 10) || 1;
-      const duracaoHoras = prazoExecucao * 8;
+      const unidade = s.prazoUnidade || s.prazo_unidade || "dias";
       const valorHora = parseFloat(s.valor_hora) || 0;
+      let duracaoHoras;
+      if (unidade === "minutos") {
+        duracaoHoras = Number((prazoExecucao / 60).toFixed(2));
+      } else if (unidade === "horas") {
+        duracaoHoras = prazoExecucao;
+      } else {
+        duracaoHoras = prazoExecucao * 8;
+      }
       const total = mob * duracaoHoras * valorHora;
       return {
         servico_id: s.servico_id || null,
         descricao: String(s.descricao || "").trim() || "Serviço",
         mob,
         prazo_execucao: prazoExecucao,
+        prazo_unidade: ["minutos", "horas", "dias"].includes(unidade) ? unidade : "dias",
         duracao_horas: duracaoHoras,
         valor_hora: valorHora,
         total: Number(total.toFixed(2)),
@@ -168,6 +177,7 @@ function serializar(o) {
     descricao: s.descricao,
     mob: Number(s.mob) || 1,
     prazoExecucao: Number(s.prazo_execucao) || 1,
+    prazoUnidade: s.prazo_unidade || "dias",
     duracaoHoras: Number(s.duracao_horas) || 0,
     valorHora: Number(s.valor_hora) || 0,
     total: Number(s.total) || 0,

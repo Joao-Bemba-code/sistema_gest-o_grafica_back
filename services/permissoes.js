@@ -1,7 +1,9 @@
 // ===== Definições de papéis (perfis) e permissões =====
 // Módulos disponíveis no sistema
 const MODULOS = [
-  "comercial",   // orçamentos, clientes, faturação
+  "comercial",   // orçamentos, clientes
+  "faturacao",   // faturação
+  "tesouraria",  // tesouraria / contas bancárias
   "producao",    // ordens de produção, processos
   "estoque",     // provisionamento / materiais
   "maquinas",    // maquinária
@@ -31,6 +33,7 @@ const PERFIS = {
     permissoes: {
       comercial: { ver: true, criar: true, editar: true, eliminar: true, aprovar: true },
       faturacao: { ver: true, criar: true, editar: true, eliminar: true, aprovar: true },
+      tesouraria: { ver: true, criar: true, editar: true, eliminar: true, aprovar: true },
       estoque: { ver: true, criar: true, editar: true, eliminar: true, aprovar: true },
       maquinas: { ver: true, criar: true, editar: true, eliminar: true, aprovar: true },
       categorias: { ver: true, criar: true, editar: true, eliminar: true, aprovar: true },
@@ -47,6 +50,7 @@ const PERFIS = {
       maquinas: { ver: false, criar: false, editar: true, eliminar: false, aprovar: false },
       comercial: { ver: false, criar: false, editar: false, eliminar: false, aprovar: false },
       faturacao: { ver: false, criar: false, editar: false, eliminar: false, aprovar: false },
+      tesouraria: { ver: false, criar: false, editar: false, eliminar: false, aprovar: false },
       estoque: { ver: false, criar: false, editar: false, eliminar: false, aprovar: false },
       categorias: { ver: false, criar: false, editar: false, eliminar: false, aprovar: false },
       relatorios: { ver: false, criar: false, editar: false, eliminar: false, aprovar: false },
@@ -59,6 +63,7 @@ const PERFIS = {
     permissoes: {
       comercial: { ver: true, criar: false, editar: false, eliminar: false, aprovar: false },
       faturacao: { ver: true, criar: false, editar: false, eliminar: false, aprovar: false },
+      tesouraria: { ver: true, criar: false, editar: false, eliminar: false, aprovar: false },
       producao: { ver: true, criar: false, editar: false, eliminar: false, aprovar: false },
       estoque: { ver: true, criar: false, editar: false, eliminar: false, aprovar: false },
       maquinas: { ver: true, criar: false, editar: false, eliminar: false, aprovar: false },

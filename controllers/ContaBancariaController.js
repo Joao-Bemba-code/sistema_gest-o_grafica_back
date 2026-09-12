@@ -1,4 +1,4 @@
-const { ContaBancaria } = require("../models");
+const { ContaBancaria, TesourariaMovimento } = require("../models");
 
 const TIPOS_CONTA = ["corrente", "poupanca", "caixa", "investimento"];
 
@@ -52,6 +52,32 @@ exports.criar = async (req, res) => {
       observacoes: observacoes || null,
       favorita: !!favorita,
     });
+
+    // Se a conta é criada com saldo inicial, regista automaticamente a entrada
+    // na tesouraria para que o resumo "Entradas do Mês" não fique a zero.
+    if (saldo > 0) {
+      try {
+        await TesourariaMovimento.create({
+          organizacao_id: req.organizacao_id,
+          usuario_id: req.usuario.id,
+          tipo: "entrada",
+          categoria: "deposito",
+          descricao: `Saldo inicial da conta ${conta.banco_nome}`,
+          valor: saldo,
+          data_movimento: new Date().toISOString().split("T")[0],
+          hora_movimento: new Date().toTimeString().split(" ")[0],
+          referencia: conta.numero_conta || null,
+          referencia_tipo: "deposito",
+          conta_bancaria_id: conta.id,
+          metodo_pagamento: "deposito",
+          estado: "confirmado",
+          observacoes: "Entrada automática gerada pela criação da conta bancária",
+        });
+      } catch (eMov) {
+        console.error("Erro ao criar entrada de saldo inicial:", eMov);
+      }
+    }
+
     return res.status(201).json(conta);
   } catch (e) {
     console.error("Erro ao criar conta bancária:", e);
@@ -70,6 +96,57 @@ exports.atualizar = async (req, res) => {
     delete dados.organizacao_id;
     if (dados.tipo_conta && !TIPOS_CONTA.includes(dados.tipo_conta)) delete dados.tipo_conta;
     if (dados.saldo_inicial !== undefined) dados.saldo_inicial = parseFloat(dados.saldo_inicial) || 0;
+
+    // Se o saldo_atual for ajustado manualmente, regista um movimento de
+    // tesouraria com a diferença (entrada se aumentou, saída se diminuiu).
+    if (dados.saldo_atual !== undefined) {
+      const novoSaldo = parseFloat(dados.saldo_atual) || 0;
+      const dif = novoSaldo - Number(conta.saldo_atual || 0);
+      if (dif > 0) {
+        try {
+          await TesourariaMovimento.create({
+            organizacao_id: req.organizacao_id,
+            usuario_id: req.usuario.id,
+            tipo: "entrada",
+            categoria: "deposito",
+            descricao: `Ajuste manual de saldo da conta ${conta.banco_nome}`,
+            valor: dif,
+            data_movimento: new Date().toISOString().split("T")[0],
+            hora_movimento: new Date().toTimeString().split(" ")[0],
+            referencia: conta.numero_conta || null,
+            referencia_tipo: "deposito",
+            conta_bancaria_id: conta.id,
+            metodo_pagamento: "deposito",
+            estado: "confirmado",
+            observacoes: "Entrada automática gerada por ajuste manual de saldo",
+          });
+        } catch (eMov) {
+          console.error("Erro ao registar ajuste de saldo (entrada):", eMov);
+        }
+      } else if (dif < 0) {
+        try {
+          await TesourariaMovimento.create({
+            organizacao_id: req.organizacao_id,
+            usuario_id: req.usuario.id,
+            tipo: "saida",
+            categoria: "levantamento",
+            descricao: `Ajuste manual de saldo da conta ${conta.banco_nome}`,
+            valor: Math.abs(dif),
+            data_movimento: new Date().toISOString().split("T")[0],
+            hora_movimento: new Date().toTimeString().split(" ")[0],
+            referencia: conta.numero_conta || null,
+            referencia_tipo: "outro",
+            conta_bancaria_id: conta.id,
+            metodo_pagamento: "transferencia",
+            estado: "confirmado",
+            observacoes: "Saída automática gerada por ajuste manual de saldo",
+          });
+        } catch (eMov) {
+          console.error("Erro ao registar ajuste de saldo (saída):", eMov);
+        }
+      }
+    }
+
     await conta.update(dados);
     return res.json(conta);
   } catch (e) {

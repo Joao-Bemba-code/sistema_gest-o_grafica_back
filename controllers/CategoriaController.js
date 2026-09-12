@@ -1,4 +1,15 @@
-const { Categoria } = require("../models");
+const { sequelize, Categoria } = require("../models");
+
+async function garantirFamiliaVarchar() {
+  await sequelize.query("SET SESSION sql_mode = 'NO_ENGINE_SUBSTITUTION'");
+  await sequelize.query("ALTER TABLE `categoria` MODIFY `familia` VARCHAR(50) NOT NULL DEFAULT 'papeis'");
+  console.log("MIGRAÇÃO: categoria.familia convertido para VARCHAR(50)");
+}
+
+function truncadoFamilia(e) {
+  const msg = String(e?.parent?.message || e?.original?.message || e?.message || "");
+  return msg.toLowerCase().includes("familia") && msg.toLowerCase().includes("truncat");
+}
 
 exports.listar = async (req, res) => {
   try {
@@ -23,14 +34,25 @@ async function nomeDuplicado(organizacaoId, nome, ignorarId = null) {
 }
 
 exports.criar = async (req, res) => {
+  let dados;
   try {
-    const dados = { ...req.body, organizacao_id: req.organizacao_id };
+    dados = { ...req.body, organizacao_id: req.organizacao_id };
     if (await nomeDuplicado(req.organizacao_id, dados.nome)) {
       return res.status(409).json({ erro: `Já existe uma categoria com o nome "${String(dados.nome).trim()}". Escolha outro nome ou use a existente.` });
     }
     const categoria = await Categoria.create(dados);
     return res.status(201).json(categoria);
   } catch (e) {
+    if (truncadoFamilia(e)) {
+      try {
+        await garantirFamiliaVarchar();
+        const categoria = await Categoria.create(dados);
+        return res.status(201).json(categoria);
+      } catch (e2) {
+        console.error("Erro ao criar categoria (após corrigir familia):", e2);
+      }
+    }
+    console.error("Erro ao criar categoria:", e);
     return res.status(500).json({ erro: "Erro ao criar categoria" });
   }
 };
@@ -63,9 +85,17 @@ exports.atualizar = async (req, res) => {
     if (await nomeDuplicado(req.organizacao_id, dados.nome ?? categoria.nome, categoria.id)) {
       return res.status(409).json({ erro: `Já existe outra categoria com o nome "${String(dados.nome).trim()}".` });
     }
-    await categoria.update(dados);
-    return res.json(categoria);
+    try {
+      await categoria.update(dados);
+      return res.json(categoria);
+    } catch (e) {
+      if (!truncadoFamilia(e)) throw e;
+      await garantirFamiliaVarchar();
+      await categoria.update(dados);
+      return res.json(categoria);
+    }
   } catch (e) {
+    console.error("Erro ao atualizar categoria:", e);
     return res.status(500).json({ erro: "Erro ao atualizar categoria" });
   }
 };

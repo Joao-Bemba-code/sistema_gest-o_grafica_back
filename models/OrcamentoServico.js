@@ -8,6 +8,7 @@ const OrcamentoServico = sequelize.define("orcamento_servico", {
   descricao:       { type: DataTypes.STRING(255), allowNull: false },
   mob:             { type: DataTypes.INTEGER, defaultValue: 1 },
   prazo_execucao:  { type: DataTypes.INTEGER, defaultValue: 1 },
+  prazo_unidade:   { type: DataTypes.STRING(20), defaultValue: "dias" },
   duracao_horas:   { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
   valor_hora:      { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
   total:           { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },

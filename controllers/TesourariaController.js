@@ -1,5 +1,6 @@
 const { TesourariaMovimento, ContaBancaria, Cliente, Faturacao, Usuario } = require("../models");
 const { Op, fn, col, literal } = require("sequelize");
+const { gerarExcel } = require("../services/tesourariaExcel");
 
 const ESTADOS = ["pendente", "confirmado", "cancelado"];
 const TIPOS = ["entrada", "saida", "transferencia"];
@@ -29,10 +30,10 @@ exports.listar = async (req, res) => {
     const movimentos = await TesourariaMovimento.findAll({
       where,
       include: [
-        { model: ContaBancaria, as: "conta", attributes: ["id", "banco_nome", "numero_conta", "tipo_conta"] },
-        { model: Cliente, as: "cliente", attributes: ["id", "nome", "empresa"] },
-        { model: Faturacao, as: "fatura", attributes: ["id", "numero", "total"] },
-        { model: Usuario, as: "usuario", attributes: ["id", "nome"] },
+        { model: ContaBancaria, as: "conta", attributes: ["id", "banco_nome", "numero_conta", "tipo_conta"], required: false },
+        { model: Cliente, as: "cliente", attributes: ["id", "nome", "empresa"], required: false },
+        { model: Faturacao, as: "fatura", attributes: ["id", "numero", "total"], required: false },
+        { model: Usuario, as: "usuario", attributes: ["id", "nome"], required: false },
       ],
       order: [["data_movimento", "DESC"], ["createdAt", "DESC"]],
     });
@@ -48,11 +49,11 @@ exports.buscar = async (req, res) => {
     const movimento = await TesourariaMovimento.findOne({
       where: { id: req.params.id, organizacao_id: req.organizacao_id },
       include: [
-        { model: ContaBancaria, as: "conta" },
-        { model: Cliente, as: "cliente" },
-        { model: Faturacao, as: "fatura" },
-        { model: Usuario, as: "usuario", attributes: ["id", "nome"] },
-        { model: Usuario, as: "aprovador", attributes: ["id", "nome"] },
+        { model: ContaBancaria, as: "conta", required: false },
+        { model: Cliente, as: "cliente", required: false },
+        { model: Faturacao, as: "fatura", required: false },
+        { model: Usuario, as: "usuario", attributes: ["id", "nome"], required: false },
+        { model: Usuario, as: "aprovador", attributes: ["id", "nome"], required: false },
       ],
     });
     if (!movimento) return res.status(404).json({ erro: "Movimento não encontrado" });
@@ -73,6 +74,9 @@ exports.criar = async (req, res) => {
     } = req.body;
 
     if (!tipo || !TIPOS.includes(tipo)) return res.status(400).json({ erro: "Tipo de movimento inválido" });
+    if (tipo === "entrada") {
+      return res.status(400).json({ erro: "Entradas não podem ser registadas manualmente. Marque a fatura como paga para gerar a entrada automaticamente." });
+    }
     if (!descricao || !String(descricao).trim()) return res.status(400).json({ erro: "Descrição é obrigatória" });
     const valorNum = parseFloat(valor);
     if (!valorNum || valorNum <= 0) return res.status(400).json({ erro: "Valor deve ser maior que zero" });
@@ -128,9 +132,9 @@ exports.criar = async (req, res) => {
 
     const completa = await TesourariaMovimento.findByPk(movimento.id, {
       include: [
-        { model: ContaBancaria, as: "conta" },
-        { model: Cliente, as: "cliente" },
-        { model: Usuario, as: "usuario", attributes: ["id", "nome"] },
+        { model: ContaBancaria, as: "conta", required: false },
+        { model: Cliente, as: "cliente", required: false },
+        { model: Usuario, as: "usuario", attributes: ["id", "nome"], required: false },
       ],
     });
     return res.status(201).json(completa);
@@ -152,13 +156,16 @@ exports.atualizar = async (req, res) => {
     delete dados.organizacao_id;
     delete dados.usuario_id;
     if (dados.tipo && !TIPOS.includes(dados.tipo)) delete dados.tipo;
+    if (dados.tipo === "entrada") {
+      return res.status(400).json({ erro: "Entradas não podem ser registadas manualmente. Marque a fatura como paga para gerar a entrada automaticamente." });
+    }
     if (dados.estado && !ESTADOS.includes(dados.estado)) delete dados.estado;
     await movimento.update(dados);
     const completa = await TesourariaMovimento.findByPk(movimento.id, {
       include: [
-        { model: ContaBancaria, as: "conta" },
-        { model: Cliente, as: "cliente" },
-        { model: Usuario, as: "usuario", attributes: ["id", "nome"] },
+        { model: ContaBancaria, as: "conta", required: false },
+        { model: Cliente, as: "cliente", required: false },
+        { model: Usuario, as: "usuario", attributes: ["id", "nome"], required: false },
       ],
     });
     return res.json(completa);
@@ -174,13 +181,24 @@ exports.remover = async (req, res) => {
       where: { id: req.params.id, organizacao_id: req.organizacao_id },
     });
     if (!movimento) return res.status(404).json({ erro: "Movimento não encontrado" });
-    if (movimento.estado === "confirmado" && movimento.conta_bancaria_id) {
-      const conta = await ContaBancaria.findByPk(movimento.conta_bancaria_id);
-      if (conta) {
-        const novoSaldo = movimento.tipo === "entrada"
-          ? Number(conta.saldo_atual) - Number(movimento.valor)
-          : Number(conta.saldo_atual) + Number(movimento.valor);
-        await conta.update({ saldo_atual: Number(novoSaldo.toFixed(2)) });
+    if (movimento.estado === "confirmado") {
+      // Repor o saldo da conta de origem.
+      if (movimento.conta_bancaria_id) {
+        const conta = await ContaBancaria.findByPk(movimento.conta_bancaria_id);
+        if (conta) {
+          const novoSaldo = movimento.tipo === "entrada"
+            ? Number(conta.saldo_atual) - Number(movimento.valor)
+            : Number(conta.saldo_atual) + Number(movimento.valor);
+          await conta.update({ saldo_atual: Number(novoSaldo.toFixed(2)) });
+        }
+      }
+      // Repor o saldo da conta destino (transferência).
+      if (movimento.tipo === "transferencia" && movimento.conta_destino_id) {
+        const contaDest = await ContaBancaria.findByPk(movimento.conta_destino_id);
+        if (contaDest) {
+          const novoSaldo = Number(contaDest.saldo_atual) - Number(movimento.valor);
+          await contaDest.update({ saldo_atual: Number(novoSaldo.toFixed(2)) });
+        }
       }
     }
     await movimento.update({ deleted: 1, deletedAt: new Date() });
@@ -258,8 +276,8 @@ exports.movimentosPorConta = async (req, res) => {
     const movimentos = await TesourariaMovimento.findAll({
       where,
       include: [
-        { model: Cliente, as: "cliente", attributes: ["id", "nome"] },
-        { model: Usuario, as: "usuario", attributes: ["id", "nome"] },
+        { model: Cliente, as: "cliente", attributes: ["id", "nome"], required: false },
+        { model: Usuario, as: "usuario", attributes: ["id", "nome"], required: false },
       ],
       order: [["data_movimento", "DESC"]],
     });
@@ -272,10 +290,11 @@ exports.movimentosPorConta = async (req, res) => {
 
 exports.exportar = async (req, res) => {
   try {
-    const { tipo, categoria, data_inicio, data_fim } = req.query;
+    const { tipo, categoria, data_inicio, data_fim, conta_id } = req.query;
     const where = { organizacao_id: req.organizacao_id, deleted: false };
     if (tipo) where.tipo = tipo;
     if (categoria) where.categoria = categoria;
+    if (conta_id) where.conta_bancaria_id = conta_id;
     if (data_inicio || data_fim) {
       where.data_movimento = {};
       if (data_inicio) where.data_movimento[Op.gte] = data_inicio;
@@ -284,9 +303,11 @@ exports.exportar = async (req, res) => {
     const movimentos = await TesourariaMovimento.findAll({
       where,
       include: [
-        { model: ContaBancaria, as: "conta", attributes: ["banco_nome", "numero_conta"] },
+        { model: ContaBancaria, as: "conta", attributes: ["id", "banco_nome", "numero_conta"], required: false },
+        { model: ContaBancaria, as: "contaDestino", attributes: ["id", "banco_nome", "numero_conta"], required: false },
+        { model: Cliente, as: "cliente", attributes: ["id", "nome", "empresa"], required: false },
       ],
-      order: [["data_movimento", "DESC"]],
+      order: [["data_movimento", "ASC"], ["createdAt", "ASC"]],
     });
 
     function fmtData(v) {
@@ -299,23 +320,124 @@ exports.exportar = async (req, res) => {
       return `${dd}/${mm}/${yyyy}`;
     }
 
-    const sep = "\t";
-    const cabecalho = ["Data", "Tipo", "Categoria", "Descricao", "Valor (Kz)", "Metodo", "Conta Origem", "Estado", "Referencia"].join(sep);
-    const linhas = movimentos.map((m) => [
-      fmtData(m.data_movimento),
-      m.tipo,
-      m.categoria || "",
-      m.descricao,
-      String(m.valor).replace(".", ","),
-      m.metodo_pagamento || "",
-      m.conta ? `${m.conta.banco_nome || ""} ${m.conta.numero_conta || ""}`.trim() : "",
-      m.estado,
-      m.referencia || "",
-    ].join(sep));
+    function fmtHora(v) {
+      if (!v) return "";
+      const s = String(v).split(":").slice(0, 2).join(":");
+      return s;
+    }
 
-    const csv = "\uFEFF" + cabecalho + "\n" + linhas.join("\n");
+    function fmtValor(v) {
+      return Number(v || 0).toFixed(2).replace(".", ",");
+    }
+
+    const capitalizar = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : "");
+
+    // Começamos o saldo acumulado a partir dos saldos actuais e retrocedemos.
+    // Para o extracto, simplesmente percorremos os movimentos e acumulamos.
+    // Melhor abordagem: usar o saldo da conta antes do período (se pedido).
+    let saldoAnterior = 0;
+    if (conta_id && movimentos.length) {
+      // Calcular o total dos movimentos confirma dos fora do período para a mesma conta.
+      const ids = movimentos.map((m) => m.id);
+      const fora = await TesourariaMovimento.sum("valor", {
+        where: {
+          organizacao_id: req.organizacao_id,
+          deleted: false,
+          conta_bancaria_id: conta_id,
+          estado: "confirmado",
+          id: { [Op.notIn]: ids },
+        },
+      });
+      const saldoAtual = await ContaBancaria.sum("saldo_atual", {
+        where: { id: conta_id, organizacao_id: req.organizacao_id },
+      });
+      saldoAnterior = Number(saldoAtual || 0) - Number(fora || 0);
+    }
+
+    // Exportação para Excel (.xlsx) com formatação — ?formato=xlsx
+    if (String(req.query.formato || "").toLowerCase() === "xlsx") {
+      const moeda = String(req.query.moeda || "KZ").toUpperCase();
+      const buffer = await gerarExcel({ movimentos, conta_id, saldoAnterior, moeda });
+      const dataExport = new Date().toISOString().split("T")[0];
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", `attachment; filename="extrato_tesouraria_${dataExport}.xlsx"`);
+      return res.send(Buffer.from(buffer));
+    }
+
+    const estilos = { entrada: "Entrada", saida: "Saída", transferencia: "Transferência" };
+
+    const linhas = [];
+    // Cabecalho principal igual ao formato bancário/extracto.
+    const cabecalho = [
+      "Data",
+      "Hora",
+      "Tipo",
+      "Categoria",
+      "Descrição",
+      "Valor Entrada",
+      "Valor Saída",
+      "Saldo Acumulado",
+      "Método",
+      "Conta Origem",
+      "Conta Destino",
+      "Estado",
+      "Referência",
+      "Cliente",
+      "Observações",
+    ].join(";");
+
+    // Para extracto por conta, começamos com o saldo anterior.
+    linhas.push(cabecalho);
+
+    let saldo = saldoAnterior;
+    for (const m of movimentos) {
+      const tipoLabel = estilos[m.tipo] || m.tipo;
+      const isEntrada = m.tipo === "entrada";
+      const isTransferencia = m.tipo === "transferencia";
+      // Transferência: não afecta o saldo global (sai da origem, entra no destino).
+      // Saída: reduz o saldo. Entrada: aumenta o saldo.
+      const delta = isEntrada ? Number(m.valor) : isTransferencia ? 0 : -Number(m.valor);
+      saldo = Number((saldo + delta).toFixed(2));
+      const origem = m.conta ? `${m.conta.banco_nome || ""}${m.conta.numero_conta ? ` (${m.conta.numero_conta})` : ""}`.trim() : "";
+      const destino = m.contaDestino ? `${m.contaDestino.banco_nome || ""}${m.contaDestino.numero_conta ? ` (${m.contaDestino.numero_conta})` : ""}`.trim() : "";
+      const cliente = m.cliente ? (m.cliente.empresa || m.cliente.nome || "") : "";
+      linhas.push([
+        fmtData(m.data_movimento),
+        fmtHora(m.hora_movimento),
+        tipoLabel,
+        capitalizar(m.categoria || ""),
+        String(m.descricao || "").replace(/"/g, '""'),
+        isEntrada ? fmtValor(m.valor) : "",
+        isEntrada ? "" : fmtValor(m.valor),
+        fmtValor(saldo),
+        capitalizar(m.metodo_pagamento || ""),
+        origem,
+        destino,
+        capitalizar(m.estado || ""),
+        String(m.referencia || "").replace(/"/g, '""'),
+        String(cliente).replace(/"/g, '""'),
+        String(m.observacoes || "").replace(/"/g, '""'),
+      ].map((c) => `"${c}"`).join(";"));
+    }
+
+    if (movimentos.length === 0) {
+      linhas.push(['"", "", "", "", "", "", "", "", "", "", "", "", "", "", ""'].join(";"));
+    }
+
+    // Resumo / rodapé.
+    const totalEntradas = movimentos.filter((m) => m.tipo === "entrada").reduce((s, m) => s + Number(m.valor || 0), 0);
+    const totalSaidas = movimentos.filter((m) => m.tipo === "saida" || m.tipo === "transferencia").reduce((s, m) => s + Number(m.valor || 0), 0);
+    linhas.push("");
+    linhas.push(`"TOTAL ENTRADAS";"${fmtValor(totalEntradas)}"`);
+    linhas.push(`"TOTAL SAÍDAS";"${fmtValor(totalSaidas)}"`);
+    linhas.push(`"SALDO DO PERÍODO";"${fmtValor(Number((totalEntradas - totalSaidas).toFixed(2)))}"`);
+    linhas.push(`"EXPORTADO EM";"${new Date().toLocaleString("pt-AO")}"`);
+
+    const csv = "\uFEFF" + linhas.join("\r\n");
+
+    const dataExport = new Date().toISOString().split("T")[0];
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
-    res.setHeader("Content-Disposition", `attachment; filename="tesouraria_${new Date().toISOString().split("T")[0]}.csv"`);
+    res.setHeader("Content-Disposition", `attachment; filename="extrato_tesouraria_${dataExport}.csv"`);
     return res.send(csv);
   } catch (e) {
     console.error("Erro ao exportar tesouraria:", e);

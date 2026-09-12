@@ -26,6 +26,7 @@ const Material = sequelize.define("material", {
   percentual_quebra: { type: DataTypes.DECIMAL(5, 2), defaultValue: 0 },
   mover_estoque: { type: DataTypes.BOOLEAN, defaultValue: true },
   especificacoes: { type: DataTypes.JSON, defaultValue: {} },
+  composicao: { type: DataTypes.JSON, defaultValue: [] },
   quantidade: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
   estoque_reservado: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
   estoque_min: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },

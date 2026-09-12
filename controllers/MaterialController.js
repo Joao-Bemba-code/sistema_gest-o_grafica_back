@@ -63,6 +63,9 @@ function normalizarDados(body) {
   if (dados.controla_lote !== undefined) dados.controla_lote = !!dados.controla_lote;
   if (dados.mover_estoque !== undefined) dados.mover_estoque = !!dados.mover_estoque;
   if (dados.ativo !== undefined) dados.ativo = !!dados.ativo;
+  if (dados.composicao !== undefined) {
+    dados.composicao = Array.isArray(dados.composicao) ? dados.composicao : [];
+  }
   return dados;
 }
 
