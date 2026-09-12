@@ -15,6 +15,7 @@ const Organizacao = sequelize.define("organizacao", {
   banco_nome: { type: DataTypes.STRING(150) },
   banco_iban: { type: DataTypes.STRING(50) },
   banco_conta: { type: DataTypes.STRING(50) },
+  valor_hora_servicos: { type: DataTypes.DECIMAL(12, 2), allowNull: false, defaultValue: 0, comment: "Valor por hora único aplicado aos serviços" },
   ativo: { type: DataTypes.BOOLEAN, defaultValue: true },
 });
 
