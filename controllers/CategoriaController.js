@@ -11,6 +11,23 @@ function truncadoFamilia(e) {
   return msg.toLowerCase().includes("familia") && msg.toLowerCase().includes("truncat");
 }
 
+// Normaliza o grupo (tipo) para variantes escritas serem tratadas como iguais.
+// Ex.: "Maquinaria", "Maquina", "máquina" e "maquina" colapsam num só grupo.
+const TIPOS_CANONICOS = new Map([
+  ["materia_prima", "materia_prima"], ["matéria-prima", "materia_prima"], ["materia-prima", "materia_prima"], ["matéria prima", "materia_prima"], ["materia prima", "materia_prima"],
+  ["artigo", "artigo"], ["artigo / produto", "artigo"], ["artigo/produto", "artigo"],
+  ["produto_acabado", "produto_acabado"], ["produto acabado", "produto_acabado"],
+  ["servico", "servico"], ["serviço", "servico"], ["servicos", "servico"], ["serviços", "servico"],
+  ["maquina", "maquina"], ["máquina", "maquina"], ["maquinaria", "maquina"],
+  ["funcionario", "funcionario"], ["colaborador", "colaborador"],
+  ["consumiveis", "consumiveis"], ["equipamentos", "equipamentos"], ["ferramentas", "ferramentas"],
+]);
+
+function normalizarTipo(v) {
+  const t = String(v || "").trim().toLowerCase().replace(/\s+/g, " ");
+  return TIPOS_CANONICOS.get(t) || t;
+}
+
 exports.listar = async (req, res) => {
   try {
     const categorias = await Categoria.findAll({
@@ -23,30 +40,45 @@ exports.listar = async (req, res) => {
   }
 };
 
-async function nomeDuplicado(organizacaoId, nome, ignorarId = null) {
+// Uma família pode ter várias categorias: o que distingue é o GRUPO (tipo)
+// e/ou a SUBFAMÍLIA. Só bloqueamos quando os três coincidem.
+async function categoriaDuplicada(organizacaoId, { familia, subfamilia, tipo }, ignorarId = null) {
   const normalizar = (s) => String(s || "").trim().toLowerCase();
-  const alvo = normalizar(nome);
-  if (!alvo) return false;
+  const alvo = { familia: normalizar(familia), subfamilia: normalizar(subfamilia), tipo: normalizarTipo(tipo) };
   const categorias = await Categoria.findAll({
     where: { organizacao_id: organizacaoId, deleted: false },
   });
-  return categorias.some((c) => String(c.id) !== String(ignorarId) && normalizar(c.nome) === alvo);
+  return categorias.some((c) => {
+    if (String(c.id) === String(ignorarId)) return false;
+    return normalizar(c.familia) === alvo.familia
+      && normalizar(c.subfamilia) === alvo.subfamilia
+      && normalizarTipo(c.tipo) === alvo.tipo;
+  });
+}
+
+// A família é agora a identificação principal; o campo técnico "nome"
+// é preenchido automaticamente para compatibilidade com o resto do sistema.
+function comNomePadrao(dados) {
+  const nome = String(dados.nome || "").trim() || String(dados.familia || "").trim() || "sem-familia";
+  return { ...dados, nome, deleted: dados.deleted ?? false };
 }
 
 exports.criar = async (req, res) => {
   let dados;
   try {
     dados = { ...req.body, organizacao_id: req.organizacao_id };
-    if (await nomeDuplicado(req.organizacao_id, dados.nome)) {
-      return res.status(409).json({ erro: `Já existe uma categoria com o nome "${String(dados.nome).trim()}". Escolha outro nome ou use a existente.` });
+    delete dados.grupo;
+    const dup = await categoriaDuplicada(req.organizacao_id, dados);
+    if (dup) {
+      return res.status(409).json({ erro: "Já existe uma categoria com a mesma Família, Subfamília e Grupo. Pode criar outra na mesma família — basta alterar o Grupo ou a Subfamília." });
     }
-    const categoria = await Categoria.create(dados);
+    const categoria = await Categoria.create(comNomePadrao(dados));
     return res.status(201).json(categoria);
   } catch (e) {
     if (truncadoFamilia(e)) {
       try {
         await garantirFamiliaVarchar();
-        const categoria = await Categoria.create(dados);
+        const categoria = await Categoria.create(comNomePadrao(dados));
         return res.status(201).json(categoria);
       } catch (e2) {
         console.error("Erro ao criar categoria (após corrigir familia):", e2);
@@ -79,19 +111,28 @@ exports.atualizar = async (req, res) => {
     const dados = { ...req.body };
     delete dados.id;
     delete dados.organizacao_id;
+    delete dados.grupo;
     if (dados.campos_especificacao !== undefined && !Array.isArray(dados.campos_especificacao)) {
       return res.status(422).json({ erro: "campos_especificacao deve ser uma lista" });
     }
-    if (await nomeDuplicado(req.organizacao_id, dados.nome ?? categoria.nome, categoria.id)) {
-      return res.status(409).json({ erro: `Já existe outra categoria com o nome "${String(dados.nome).trim()}".` });
+    if (dados.nome !== undefined && !String(dados.nome).trim() && dados.familia !== undefined) {
+      delete dados.nome;
+    }
+    const alvo = {
+      familia: dados.familia ?? categoria.familia,
+      subfamilia: dados.subfamilia ?? categoria.subfamilia,
+      tipo: dados.tipo ?? categoria.tipo,
+    };
+    if (await categoriaDuplicada(req.organizacao_id, alvo, categoria.id)) {
+      return res.status(409).json({ erro: "Já existe outra categoria com a mesma Família, Subfamília e Grupo. Mude o Grupo ou a Subfamília." });
     }
     try {
-      await categoria.update(dados);
+      await categoria.update(comNomePadrao(dados));
       return res.json(categoria);
     } catch (e) {
       if (!truncadoFamilia(e)) throw e;
       await garantirFamiliaVarchar();
-      await categoria.update(dados);
+      await categoria.update(comNomePadrao(dados));
       return res.json(categoria);
     }
   } catch (e) {

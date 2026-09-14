@@ -10,6 +10,7 @@ const Categoria = sequelize.define("categoria", {
     defaultValue: "papeis",
   },
   subfamilia: { type: DataTypes.STRING(100), allowNull: true },
+  descricao: { type: DataTypes.TEXT, allowNull: true },
   tipo: {
     type: DataTypes.STRING(50),
     defaultValue: "materia_prima",
