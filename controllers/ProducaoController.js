@@ -1,4 +1,4 @@
-const { sequelize, OrdemProducao, PreImpressao, Impressao, Acabamento, Qualidade, Cliente, Orcamento, ReservaEstoque, Maquina } = require("../models");
+const { sequelize, OrdemProducao, PreImpressao, Impressao, Acabamento, Qualidade, Cliente, Orcamento, OrcamentoItem, OrcamentoMaterial, ReservaEstoque, Maquina } = require("../models");
 const estoqueService = require("../services/estoque");
 const notificacoesService = require("../services/notificacoes");
 
@@ -50,7 +50,11 @@ function paraBooleano(v) {
 function includeOrdem() {
   return [
     { model: Cliente, required: false },
-    { model: Orcamento, required: false },
+    { model: Orcamento, required: false, include: [
+      { model: OrcamentoItem, required: false, include: [
+        { model: OrcamentoMaterial, as: "materiais", required: false },
+      ] },
+    ] },
     { model: PreImpressao, required: false },
     { model: Impressao, required: false },
     { model: Acabamento, required: false },
@@ -222,7 +226,7 @@ exports.requisitarMateriais = async (req, res) => {
       icone: "pending_actions",
       titulo: `Requisição de material pendente de aprovação — OP ${ordem.numero || ordem.id}`,
       descricao: `${ordem.cliente?.nome ? `Cliente: ${ordem.cliente.nome} · ` : ""}${ordem.produto || "Produção"} (${ordem.quantidade}) — aguarda autorização no estoque.`,
-      link: "/producao/ordens",
+      link: "/producao",
       usuarioId: req.usuario.id,
     });
     const completa = await OrdemProducao.findByPk(ordem.id, { include: includeOrdem() });
@@ -255,17 +259,18 @@ exports.aprovarMateriais = async (req, res) => {
       return res.status(422).json({ erro: "A requisição desta OP ainda não foi submetida. A produção deve primeiro submeter a requisição dos materiais." });
     }
     const b = req.body || {};
+    const permitidoPor = b.permitido_por || req.usuario.nome || null;
     await estoqueService.baixarReservas({
       organizacaoId: req.organizacao_id,
       ordemProducaoId: ordem.id,
       transaction: t,
       motivo: b.motivo || `Saída para produção — ${ordem.numero}`,
       solicitadoPor: ordem.solicitado_por || b.solicitado_por,
-      permitidoPor: b.permitido_por,
+      permitidoPor,
       observacoes: b.observacoes || ordem.observacoes_requisicao,
       clienteNome: ordem.cliente?.nome || null,
     });
-    await ordem.update({ requisicao_estado: "libertada", permitido_por: b.permitido_por || ordem.permitido_por }, { transaction: t });
+    await ordem.update({ requisicao_estado: "libertada", permitido_por: permitidoPor }, { transaction: t });
     await t.commit();
     notificacoesService.criar({
       organizacaoId: req.organizacao_id,
@@ -274,7 +279,7 @@ exports.aprovarMateriais = async (req, res) => {
       icone: "inventory",
       titulo: `Requisição de material aprovada — OP ${ordem.numero || ordem.id}`,
       descricao: `${ordem.cliente?.nome ? `Cliente: ${ordem.cliente.nome} · ` : ""}${ordem.produto || "Produção"} (${ordem.quantidade}) — saída de stock registada.`,
-      link: "/producao/ordens",
+      link: "/producao",
       usuarioId: req.usuario.id,
     });
     const completa = await OrdemProducao.findByPk(ordem.id, { include: includeOrdem() });
@@ -354,7 +359,10 @@ exports.atualizarOrdem = async (req, res) => {
       where: { id: req.params.id, organizacao_id: req.organizacao_id },
       transaction: t,
     });
-    if (!ordem) return res.status(404).json({ erro: "Ordem não encontrada" });
+    if (!ordem) {
+      await t.rollback();
+      return res.status(404).json({ erro: "Ordem não encontrada" });
+    }
     const b = req.body || {};
     const dados = {};
     const estadoAnterior = ordem.estado;
@@ -403,7 +411,10 @@ exports.removerOrdem = async (req, res) => {
       where: { id: req.params.id, organizacao_id: req.organizacao_id },
       transaction: t,
     });
-    if (!ordem) return res.status(404).json({ erro: "Ordem não encontrada" });
+    if (!ordem) {
+      await t.rollback();
+      return res.status(404).json({ erro: "Ordem não encontrada" });
+    }
     await estoqueService.cancelarReservas({
       organizacaoId: req.organizacao_id,
       ordemProducaoId: ordem.id,

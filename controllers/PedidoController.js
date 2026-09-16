@@ -117,11 +117,13 @@ exports.criar = async (req, res) => {
   try {
     const { fornecedor_id, fornecedor_nome, itens, observacoes, solicitado_por, data_pedido } = req.body;
     if (!fornecedor_nome || !String(fornecedor_nome).trim()) {
+      await t.rollback();
       return res.status(422).json({ erro: "Informe o fornecedor do pedido" });
     }
     const materiaisPorId = await carregarMateriaisPorId((itens || []).map((i) => i.material_id));
     const normalizados = normalizarItens(itens, materiaisPorId);
     if (!normalizados.length) {
+      await t.rollback();
       return res.status(422).json({ erro: "Adicione pelo menos um material com quantidade" });
     }
     const numero = await proximoNumero(req.organizacao_id);
@@ -181,12 +183,17 @@ exports.receber = async (req, res) => {
       include: [{ model: PedidoItem, required: false }],
       transaction: t,
     });
-    if (!pedido) return res.status(404).json({ erro: "Pedido não encontrado" });
+    if (!pedido) {
+      await t.rollback();
+      return res.status(404).json({ erro: "Pedido não encontrado" });
+    }
     if (pedido.estado === "cancelado") {
+      await t.rollback();
       return res.status(422).json({ erro: "Não é possível receber um pedido cancelado" });
     }
     const recebimentos = Array.isArray(req.body?.itens) ? req.body.itens : [];
     if (!recebimentos.length) {
+      await t.rollback();
       return res.status(422).json({ erro: "Informe os itens a receber" });
     }
     const itens = pedido.pedido_items || [];
@@ -229,6 +236,7 @@ exports.receber = async (req, res) => {
       recebeuAlgo = true;
     }
     if (!recebeuAlgo) {
+      await t.rollback();
       return res.status(422).json({ erro: "Nenhuma quantidade válida para receber" });
     }
     completo = itens.every((i) => (parseFloat(i.quantidade_recebida) || 0) >= (parseFloat(i.quantidade) || 0));

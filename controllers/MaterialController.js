@@ -175,30 +175,41 @@ exports.movimentar = async (req, res) => {
   try {
     const { material_id, material_destino_id, tipo, quantidade, motivo, lote, data_fabricacao, validade, referencia_tipo, referencia_id, observacoes, cliente_nome, fornecedor_nome, solicitado_por, permitido_por } = req.body;
     if (!material_id || !tipo || !quantidade) {
+      await t.rollback();
       return res.status(422).json({ erro: "Material, tipo e quantidade são obrigatórios" });
     }
-    if (tipo === "saida" && !cliente_nome) {
+    if (tipo === "saida" && !cliente_nome && !String(motivo || "").toLowerCase().includes("transfer")) {
+      await t.rollback();
       return res.status(422).json({ erro: "Informe o cliente para registar a saída" });
     }
     if (tipo === "entrada" && !fornecedor_nome) {
+      await t.rollback();
       return res.status(422).json({ erro: "Informe o fornecedor para registar a entrada" });
     }
     if (tipo === "transferencia" && !material_destino_id) {
+      await t.rollback();
       return res.status(422).json({ erro: "Informe o material de destino para a transferência" });
     }
     const material = await Material.findOne({
       where: { id: material_id, organizacao_id: req.organizacao_id },
       transaction: t,
     });
-    if (!material) return res.status(404).json({ erro: "Material não encontrado" });
+    if (!material) {
+      await t.rollback();
+      return res.status(404).json({ erro: "Material não encontrado" });
+    }
     const qtd = parseFloat(quantidade);
-    if (qtd <= 0) return res.status(422).json({ erro: "Quantidade deve ser maior que zero" });
+    if (qtd <= 0) {
+      await t.rollback();
+      return res.status(422).json({ erro: "Quantidade deve ser maior que zero" });
+    }
 
     if (tipo === "entrada") {
       await material.update({ quantidade: parseFloat(material.quantidade) + qtd }, { transaction: t });
     } else if (tipo === "transferencia") {
       const disponivel = parseFloat(material.quantidade) - parseFloat(material.estoque_reservado);
       if (disponivel < qtd) {
+        await t.rollback();
         return res.status(422).json({ erro: `Quantidade insuficiente em estoque (disponível ${disponivel} ${material.unidade})` });
       }
       await material.update({ quantidade: parseFloat(material.quantidade) - qtd }, { transaction: t });
@@ -206,11 +217,15 @@ exports.movimentar = async (req, res) => {
         where: { id: material_destino_id, organizacao_id: req.organizacao_id },
         transaction: t,
       });
-      if (!destino) return res.status(404).json({ erro: "Material de destino não encontrado" });
+      if (!destino) {
+        await t.rollback();
+        return res.status(404).json({ erro: "Material de destino não encontrado" });
+      }
       await destino.update({ quantidade: parseFloat(destino.quantidade) + qtd }, { transaction: t });
     } else {
       const disponivel = parseFloat(material.quantidade) - parseFloat(material.estoque_reservado);
       if (disponivel < qtd) {
+        await t.rollback();
         return res.status(422).json({ erro: `Quantidade insuficiente em estoque (disponível ${disponivel} ${material.unidade})` });
       }
       await material.update({ quantidade: parseFloat(material.quantidade) - qtd }, { transaction: t });
@@ -251,6 +266,7 @@ exports.reservar = async (req, res) => {
   try {
     const { ordem_producao_id, itens } = req.body;
     if (!Array.isArray(itens) || !itens.length) {
+      await t.rollback();
       return res.status(422).json({ erro: "itens são obrigatórios" });
     }
     const reservas = await estoqueService.reservarMateriais({
@@ -273,7 +289,10 @@ exports.baixar = async (req, res) => {
   const t = await sequelize.transaction();
   try {
     const { ordem_producao_id } = req.body;
-    if (!ordem_producao_id) return res.status(422).json({ erro: "ordem_producao_id é obrigatório" });
+    if (!ordem_producao_id) {
+      await t.rollback();
+      return res.status(422).json({ erro: "ordem_producao_id é obrigatório" });
+    }
     const reservas = await estoqueService.baixarReservas({
       organizacaoId: req.organizacao_id,
       ordemProducaoId: ordem_producao_id,
@@ -295,7 +314,10 @@ exports.cancelarReserva = async (req, res) => {
       where: { id: req.params.id, organizacao_id: req.organizacao_id },
       transaction: t,
     });
-    if (!reserva) return res.status(404).json({ erro: "Reserva não encontrada" });
+    if (!reserva) {
+      await t.rollback();
+      return res.status(404).json({ erro: "Reserva não encontrada" });
+    }
     const material = await Material.findOne({
       where: { id: reserva.material_id, organizacao_id: req.organizacao_id },
       transaction: t,
