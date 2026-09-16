@@ -4,8 +4,8 @@ const { gerarExcel } = require("../services/tesourariaExcel");
 
 const ESTADOS = ["pendente", "confirmado", "cancelado"];
 const TIPOS = ["entrada", "saida", "transferencia"];
-const CATEGORIAS_ENTRADA = ["venda", "servico", "devolucao", "deposito"];
-const CATEGORIAS_SAIDA = ["compra", "despesa", "salario", "imposto", "aluguel", "utilidades", "levantamento"];
+const CATEGORIAS_ENTRADA = ["venda", "servico", "devolucao", "comissao", "deposito"];
+const CATEGORIAS_SAIDA = ["compra", "despesa", "salario", "imposto", "aluguel", "utilidades", "emprestimo", "levantamento"];
 const CATEGORIAS_TRANSFERENCIA = ["transferencia_interna"];
 
 function resolverClienteId(body) {
@@ -74,8 +74,8 @@ exports.criar = async (req, res) => {
     } = req.body;
 
     if (!tipo || !TIPOS.includes(tipo)) return res.status(400).json({ erro: "Tipo de movimento inválido" });
-    if (tipo === "entrada") {
-      return res.status(400).json({ erro: "Entradas não podem ser registadas manualmente. Marque a fatura como paga para gerar a entrada automaticamente." });
+    if (tipo === "entrada" && categoria !== "comissao") {
+      return res.status(400).json({ erro: "Entradas só podem ser registadas manualmente para comissões. Para vendas, marque a fatura como paga." });
     }
     if (!descricao || !String(descricao).trim()) return res.status(400).json({ erro: "Descrição é obrigatória" });
     const valorNum = parseFloat(valor);
@@ -220,7 +220,7 @@ exports.resumo = async (req, res) => {
 
     const whereBase = { organizacao_id: org, estado: "confirmado" };
 
-    const [entradasMes, saidasMes, entradasAno, saidasAno, totalContas] = await Promise.all([
+    const [entradasMes, saidasMes, entradasAno, saidasAno, totalContas, comissoesMes, emprestimosMes] = await Promise.all([
       TesourariaMovimento.sum("valor", {
         where: { ...whereBase, tipo: "entrada", data_movimento: { [Op.between]: [inicioMes, fimMes] } },
       }),
@@ -235,6 +235,12 @@ exports.resumo = async (req, res) => {
       }),
       ContaBancaria.sum("saldo_atual", {
         where: { organizacao_id: org, ativo: true },
+      }),
+      TesourariaMovimento.sum("valor", {
+        where: { ...whereBase, categoria: "comissao", data_movimento: { [Op.between]: [inicioMes, fimMes] } },
+      }),
+      TesourariaMovimento.sum("valor", {
+        where: { ...whereBase, categoria: "emprestimo", data_movimento: { [Op.between]: [inicioMes, fimMes] } },
       }),
     ]);
 
@@ -254,6 +260,8 @@ exports.resumo = async (req, res) => {
       saldoMes: Number((entradasMes || 0) - (saidasMes || 0)),
       entradasAno: Number(entradasAno || 0),
       saidasAno: Number(saidasAno || 0),
+      comissoesMes: Number(comissoesMes || 0),
+      emprestimosMes: Number(emprestimosMes || 0),
       movimentosHoje,
       contas,
     });

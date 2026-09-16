@@ -9,10 +9,10 @@ const TesourariaMovimento = sequelize.define("tesouraria_movimento", {
     type: DataTypes.ENUM("entrada", "saida", "transferencia"),
     allowNull: false,
   },
-  categoria: {
+categoria: {
     type: DataTypes.ENUM(
-      "venda", "servico", "devolucao",
-      "compra", "despesa", "salario", "imposto", "aluguel", "utilidades",
+      "venda", "servico", "devolucao", "comissao",
+      "compra", "despesa", "salario", "imposto", "aluguel", "utilidades", "emprestimo",
       "transferencia_interna", "deposito", "levantamento"
     ),
     defaultValue: "venda",
