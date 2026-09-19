@@ -33,6 +33,50 @@ function maquinaDeMaterial(material) {
   };
 }
 
+async function materialEmMaquina(material) {
+  const { id: _id, origem, material_id, quantidade, ...campos } = maquinaDeMaterial(material);
+  let maquina = await Maquina.findOne({
+    where: {
+      organizacao_id: material.organizacao_id,
+      [Op.or]: [
+        material.codigo ? { codigo: material.codigo } : null,
+        material.nome ? { nome_comum: material.nome } : null,
+      ].filter(Boolean),
+    },
+  });
+  if (!maquina) {
+    maquina = await Maquina.create({
+      ...campos,
+      organizacao_id: material.organizacao_id,
+      historico_estados: [{ estado: "operacional", data: new Date().toISOString(), motivo: "Registo inicial (máquina do estorque)" }],
+    });
+  }
+  return maquina;
+}
+
+async function resolverMaquina(requestedId, organizacao_id) {
+  const raw = String(requestedId || "");
+  if (/^\d+$/.test(raw)) {
+    const real = await Maquina.findOne({ where: { id: raw, organizacao_id } });
+    if (real) return real;
+    const material = await Material.findOne({
+      where: { id: raw, organizacao_id },
+      include: [{ model: Categoria, as: "categoria" }],
+    });
+    if (material) return materialEmMaquina(material);
+    return null;
+  }
+  const mstock = /^s(\d+)$/.exec(raw);
+  if (mstock) {
+    const material = await Material.findOne({
+      where: { id: mstock[1], organizacao_id },
+      include: [{ model: Categoria, as: "categoria" }],
+    });
+    if (material) return materialEmMaquina(material);
+  }
+  return null;
+}
+
 exports.listar = async (req, res) => {
   try {
     const [maquinas, materiais] = await Promise.all([
@@ -97,9 +141,7 @@ exports.criar = async (req, res) => {
 
 exports.atualizar = async (req, res) => {
   try {
-    const maquina = await Maquina.findOne({
-      where: { id: req.params.id, organizacao_id: req.organizacao_id },
-    });
+    const maquina = await resolverMaquina(req.params.id, req.organizacao_id);
     if (!maquina) return res.status(404).json({ erro: "Maquina nao encontrada" });
     const dados = { ...req.body };
     const novoEstado = dados.estado;
