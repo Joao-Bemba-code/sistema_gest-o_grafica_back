@@ -1,4 +1,4 @@
-const { sequelize, OrdemProducao, PreImpressao, Impressao, Acabamento, Qualidade, Cliente, Orcamento, OrcamentoItem, OrcamentoMaterial, ReservaEstoque, Maquina } = require("../models");
+const { sequelize, OrdemProducao, PreImpressao, Impressao, Acabamento, Qualidade, Cliente, Orcamento, OrcamentoItem, OrcamentoMaterial, ReservaEstoque, Maquina, Material } = require("../models");
 const estoqueService = require("../services/estoque");
 const notificacoesService = require("../services/notificacoes");
 
@@ -317,6 +317,13 @@ exports.libertarParaMaquina = async (req, res) => {
         transaction: t,
       });
       if (maq) maquinaNome = maq.nome_comum;
+    }
+    if (!maquinaNome && maquinaId) {
+      const mat = await Material.findOne({
+        where: { id: maquinaId, organizacao_id: req.organizacao_id },
+        transaction: t,
+      });
+      if (mat) maquinaNome = String(mat.nome || "").trim();
     }
     if (!maquinaNome) {
       await t.rollback();
