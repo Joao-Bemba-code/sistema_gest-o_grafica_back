@@ -411,6 +411,59 @@ exports.atualizarOrdem = async (req, res) => {
   }
 };
 
+exports.finalizarProducao = async (req, res) => {
+  const t = await sequelize.transaction();
+  try {
+    const ordem = await OrdemProducao.findOne({
+      where: { id: req.params.id, organizacao_id: req.organizacao_id },
+      transaction: t,
+    });
+    if (!ordem) {
+      await t.rollback();
+      return res.status(404).json({ erro: "Ordem não encontrada" });
+    }
+    if (ordem.estado === "finalizado" || ordem.estado === "entregue") {
+      await t.rollback();
+      const completa = await OrdemProducao.findByPk(ordem.id, { include: includeOrdem() });
+      return res.json(completa);
+    }
+    if (!(await podeAvancar(ordem.id, req.organizacao_id, t))) {
+      await t.rollback();
+      return res.status(422).json({
+        erro: "Os materiais desta OP ainda não foram libertados pelo estoque. Faça primeiro a saída dos materiais antes de finalizar.",
+      });
+    }
+    await estoqueService.baixarReservas({
+      organizacaoId: req.organizacao_id,
+      ordemProducaoId: ordem.id,
+      transaction: t,
+      motivo: "Baixa automática — produção finalizada",
+    });
+    await ordem.update(
+      {
+        estado: "finalizado",
+        progresso: 100,
+        pre_impressao_ok: true,
+        impressao_ok: true,
+        acabamento_ok: true,
+        qualidade_ok: true,
+      },
+      { transaction: t }
+    );
+    await t.commit();
+    await registarProcesso(ordem.id, "qualidade", {
+      resultado: "aprovado",
+      observacoes: "Produção finalizada diretamente",
+    });
+    const completa = await OrdemProducao.findByPk(ordem.id, { include: includeOrdem() });
+    return res.json(completa);
+  } catch (e) {
+    await t.rollback();
+    console.error("Erro ao finalizar produção:", e);
+    return res.status(500).json({ erro: "Erro ao finalizar produção" });
+  }
+};
+
 exports.removerOrdem = async (req, res) => {
   const t = await sequelize.transaction();
   try {

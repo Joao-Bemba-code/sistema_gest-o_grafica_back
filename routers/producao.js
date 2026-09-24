@@ -13,6 +13,7 @@ router.delete("/ordens/:id", requirePermissao("producao", "eliminar"), ProducaoC
 router.post("/ordens/:id/requisitar-materiais", requirePermissao("producao", "editar"), ProducaoController.requisitarMateriais);
 router.post("/ordens/:id/aprovar-materiais", requirePermissao("producao", "aprovar"), ProducaoController.aprovarMateriais);
 router.post("/ordens/:id/libertar-maquina", requirePermissao("producao", "editar"), ProducaoController.libertarParaMaquina);
+router.post("/ordens/:id/finalizar", requirePermissao("producao", "editar"), ProducaoController.finalizarProducao);
 
 router.put("/pre-impressao/:ordem_producao_id", requirePermissao("producao", "editar"), ProducaoController.salvarPreImpressao);
 router.put("/impressao/:ordem_producao_id", requirePermissao("producao", "editar"), ProducaoController.salvarImpressao);
