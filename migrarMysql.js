@@ -100,12 +100,26 @@ async function aplicarMigracoesMysql(sequelize) {
      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'movimento_estoque' AND COLUMN_NAME = 'referencia_tipo'`,
     { type: sequelize.QueryTypes.SELECT }
   );
-  if (refs.length && !refs[0].COLUMN_TYPE.includes("pedido")) {
+  if (refs.length && !refs[0].COLUMN_TYPE.includes("requisicao_material")) {
     await sequelize.query(
       `ALTER TABLE \`movimento_estoque\` MODIFY \`referencia_tipo\`
-       ENUM('manual','op','ajuste','nf_e','reserva','devolucao','pedido') NOT NULL DEFAULT 'manual'`
+       ENUM('manual','op','ajuste','nf_e','reserva','devolucao','pedido','requisicao_material') NOT NULL DEFAULT 'manual'`
     );
-    console.log("MIGRAÇÃO: movimento_estoque.referencia_tipo inclui 'pedido'");
+    console.log("MIGRAÇÃO: movimento_estoque.referencia_tipo inclui 'requisicao_material'");
+  }
+
+  // Requisição de material acabado / consumo interno não tem cliente.
+  // A coluna passou a aceitar NULL.
+  const reqCliRef = await sequelize.query(
+    `SELECT IS_NULLABLE FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'requisicao_material' AND COLUMN_NAME = 'cliente_id'`,
+    { type: sequelize.QueryTypes.SELECT }
+  );
+  if (reqCliRef.length && reqCliRef[0].IS_NULLABLE === "NO") {
+    await sequelize.query(
+      "ALTER TABLE `requisicao_material` MODIFY `cliente_id` INT NULL"
+    );
+    console.log("MIGRAÇÃO: requisicao_material.cliente_id aceita NULL");
   }
 
   await adicionar("orcamento_servico", "servico_id", "INT NULL");
@@ -221,6 +235,21 @@ async function aplicarMigracoesMysql(sequelize) {
   // Conta bancária associada à fatura (onde o pagamento foi recebido).
   await adicionar("faturacao", "conta_bancaria_id", "INT NULL");
 
+  // A categoria da tesouraria passou a ser texto livre. Converte ENUM para VARCHAR.
+  const tesCategoriaRef = await sequelize.query(
+    "SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tesouraria_movimento' AND COLUMN_NAME = 'categoria'",
+    { type: sequelize.QueryTypes.SELECT }
+  );
+  if (tesCategoriaRef.length && tesCategoriaRef[0].COLUMN_TYPE.includes("ENUM")) {
+    try {
+      await sequelize.query("SET SESSION sql_mode = 'NO_ENGINE_SUBSTITUTION'");
+      await sequelize.query("ALTER TABLE `tesouraria_movimento` MODIFY `categoria` VARCHAR(100) NULL");
+      console.log("MIGRAÇÃO: tesouraria_movimento.categoria alterada de ENUM para VARCHAR(100)");
+    } catch (e) {
+      console.error("MIGRAÇÃO: erro ao alterar tesouraria_movimento.categoria", e.message);
+    }
+  }
+
   // Colunas de conveniência da tesouraria (evitam depender só do sync).
   const addContaColumnIfMissing = async (tab, col, def) => {
     const cols = await sequelize.query(
@@ -249,4 +278,28 @@ async function aplicarMigracoesMysql(sequelize) {
 }
 
 
-module.exports = { aplicarMigracoesMysql };
+// Correções de esquema que PRECISAM de correr ANTES do sync({ alter: true }).
+// O sync cria as chaves estrangeiras a partir dos modelos; se a tabela antiga
+// ainda tiver cliente_id NOT NULL, o MySQL recusa a FK com ON DELETE SET NULL
+// (errno 150) e o arranque trava antes de as migrações normais poderem correr.
+// Idempotente: em instalação nova o sync cria a tabela já com a coluna NULL.
+async function prepararSchemaAntesSync(sequelize) {
+  const tabelas = await sequelize.query(
+    "SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'requisicao_material'",
+    { type: sequelize.QueryTypes.SELECT }
+  );
+  if (!tabelas.length) return; // instalação nova: nada a corrigir
+
+  const col = await sequelize.query(
+    "SELECT IS_NULLABLE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'requisicao_material' AND COLUMN_NAME = 'cliente_id'",
+    { type: sequelize.QueryTypes.SELECT }
+  );
+  if (col.length && col[0].IS_NULLABLE === "NO") {
+    await sequelize.query(
+      "ALTER TABLE `requisicao_material` MODIFY `cliente_id` INT NULL"
+    );
+    console.log("PRÉ-SYNC: requisicao_material.cliente_id passou a aceitar NULL");
+  }
+}
+
+module.exports = { aplicarMigracoesMysql, prepararSchemaAntesSync };

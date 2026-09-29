@@ -47,19 +47,32 @@ function paraBooleano(v) {
   return !!v;
 }
 
+// As relações abaixo são todas hasMany. Sem `separate: true` o Sequelize
+// gera um único JOIN com produto cartesiano (ordem × itens × materiais × ...),
+// o que provoca consultas enormes que falham por timeout/packet MySQL de forma
+// intermitente conforme o volume de dados. Com `separate` cada relação é buscada
+// numa query própria, eliminando o produto cartesiano.
 function includeOrdem() {
   return [
     { model: Cliente, required: false },
     { model: Orcamento, required: false, include: [
-      { model: OrcamentoItem, required: false, include: [
-        { model: OrcamentoMaterial, as: "materiais", required: false },
+      { model: OrcamentoItem, required: false, separate: true, include: [
+        { model: OrcamentoMaterial, as: "materiais", required: false, separate: true },
       ] },
     ] },
-    { model: PreImpressao, required: false },
-    { model: Impressao, required: false },
-    { model: Acabamento, required: false },
-    { model: Qualidade, required: false },
-    { model: ReservaEstoque, required: false },
+    { model: PreImpressao, required: false, separate: true },
+    { model: Impressao, required: false, separate: true },
+    { model: Acabamento, required: false, separate: true },
+    { model: Qualidade, required: false, separate: true },
+    { model: ReservaEstoque, required: false, separate: true },
+  ];
+}
+
+// Inclui apenas o essencial (usado como fallback quando a query completa falha)
+function includeOrdemSimples() {
+  return [
+    { model: Cliente, required: false },
+    { model: ReservaEstoque, required: false, separate: true },
   ];
 }
 
@@ -86,33 +99,42 @@ async function registarProcesso(ordemId, processo, dados) {
 }
 
 exports.listarOrdens = async (req, res) => {
+  const { estado } = req.query;
+  const where = { organizacao_id: req.organizacao_id };
+  if (estado) where.estado = estado;
+  const base = { where, order: [["createdAt", "DESC"]] };
   try {
-    const { estado } = req.query;
-    const where = { organizacao_id: req.organizacao_id };
-    if (estado) where.estado = estado;
-    const ordens = await OrdemProducao.findAll({
-      where,
-      include: includeOrdem(),
-      order: [["createdAt", "DESC"]],
-    });
+    const ordens = await OrdemProducao.findAll({ ...base, include: includeOrdem() });
     return res.json(ordens);
   } catch (e) {
-    console.error("Erro ao listar ordens de produção:", e);
-    return res.status(500).json({ erro: "Erro ao listar ordens de produção" });
+    console.error("Erro ao listar ordens de produção (query completa):", e?.message || e);
+    // Fallback: devolve as OPs com o mínimo de relações para o painel não ficar vazio
+    try {
+      const ordens = await OrdemProducao.findAll({ ...base, include: includeOrdemSimples() });
+      return res.json(ordens);
+    } catch (e2) {
+      console.error("Erro ao listar ordens de produção (query simples):", e2?.message || e2);
+      return res.status(500).json({ erro: "Erro ao listar ordens de produção" });
+    }
   }
 };
 
 exports.buscarOrdem = async (req, res) => {
+  const base = { where: { id: req.params.id, organizacao_id: req.organizacao_id } };
   try {
-    const ordem = await OrdemProducao.findOne({
-      where: { id: req.params.id, organizacao_id: req.organizacao_id },
-      include: includeOrdem(),
-    });
+    const ordem = await OrdemProducao.findOne({ ...base, include: includeOrdem() });
     if (!ordem) return res.status(404).json({ erro: "Ordem de produção não encontrada" });
     return res.json(ordem);
   } catch (e) {
-    console.error("Erro ao buscar ordem:", e);
-    return res.status(500).json({ erro: "Erro ao buscar ordem" });
+    console.error("Erro ao buscar ordem:", e?.message || e);
+    try {
+      const ordem = await OrdemProducao.findOne({ ...base, include: includeOrdemSimples() });
+      if (!ordem) return res.status(404).json({ erro: "Ordem de produção não encontrada" });
+      return res.json(ordem);
+    } catch (e2) {
+      console.error("Erro ao buscar ordem (query simples):", e2?.message || e2);
+      return res.status(500).json({ erro: "Erro ao buscar ordem" });
+    }
   }
 };
 
@@ -165,6 +187,121 @@ exports.criarOrdem = async (req, res) => {
     await t.rollback();
     console.error("Erro ao criar ordem de produção:", e);
     return res.status(500).json({ erro: "Erro ao criar ordem de produção" });
+  }
+};
+
+exports.complementarMateriais = async (req, res) => {
+  const t = await sequelize.transaction();
+  try {
+    const ordem = await OrdemProducao.findOne({
+      where: { id: req.params.id, organizacao_id: req.organizacao_id },
+      include: [{ model: Cliente, required: false }],
+      transaction: t,
+    });
+    if (!ordem) {
+      await t.rollback();
+      return res.status(404).json({ erro: "Ordem não encontrada" });
+    }
+    if (["finalizado", "entregue"].includes(ordem.estado)) {
+      await t.rollback();
+      return res.status(422).json({ erro: "Não é possível acrescentar material a uma OP já finalizada ou entregue" });
+    }
+    const b = req.body || {};
+    const pedido = (Array.isArray(b.itens_materiais) ? b.itens_materiais : [])
+      .filter((i) => i && i.material_id && Number(i.quantidade) > 0);
+    if (!pedido.length) {
+      await t.rollback();
+      return res.status(422).json({ erro: "Seleccione pelo menos um material com quantidade maior que zero" });
+    }
+
+    const existentes = await ReservaEstoque.findAll({
+      where: { organizacao_id: req.organizacao_id, ordem_producao_id: ordem.id, estado: ["ativa", "parcial"] },
+      transaction: t,
+    });
+    // Só reservas sem consumo associado podem ser aumentadas; se já houver
+    // consumo, é criada uma nova reserva para não voltar a debitar o material.
+    const porMaterial = new Map();
+    for (const r of existentes) {
+      if (parseFloat(r.quantidade_consumida || 0) <= 0) {
+        porMaterial.set(Number(r.material_id), r);
+      }
+    }
+    const podemAumentar = new Set(porMaterial.keys());
+
+    const novos = pedido.filter((i) => !podemAumentar.has(Number(i.material_id)));
+    const aAumentar = pedido.filter((i) => podemAumentar.has(Number(i.material_id)));
+
+    try {
+      if (novos.length) {
+        await estoqueService.reservarMateriais({
+          organizacaoId: req.organizacao_id,
+          ordemProducaoId: ordem.id,
+          itens: novos,
+          usuarioId: req.usuario.id,
+          transaction: t,
+        });
+      }
+      for (const item of aAumentar) {
+        const reserva = porMaterial.get(Number(item.material_id));
+        const material = await Material.findOne({
+          where: { id: item.material_id, organizacao_id: req.organizacao_id },
+          transaction: t,
+          lock: t.LOCK.UPDATE,
+        });
+        if (!material || !reserva) continue;
+        const extra = estoqueService.aplicarQuebra(item.quantidade, material.percentual_quebra);
+        const disponivel = parseFloat(material.quantidade) - parseFloat(material.estoque_reservado);
+        if (disponivel < extra) {
+          const erro = new Error(
+            `Estoque insuficiente para "${material.nome}" — disponível ${disponivel} ${material.unidade}, necessários ${extra}`
+          );
+          erro.status = 422;
+          throw erro;
+        }
+        await material.update(
+          { estoque_reservado: parseFloat(material.estoque_reservado) + extra },
+          { transaction: t }
+        );
+        await reserva.update(
+          { quantidade_reservada: parseFloat(reserva.quantidade_reservada) + extra },
+          { transaction: t }
+        );
+      }
+    } catch (erroReserva) {
+      await t.rollback();
+      return res.status(erroReserva.status || 422).json({
+        erro: erroReserva.message || "Estoque insuficiente para reservar materiais",
+      });
+    }
+
+    // Se os materiais já tinham sido libertados, a OP volta a "requisitada"
+    // para que o novo material passe por aprovação do estoque.
+    const precisaAprovar = ordem.requisicao_estado === "libertada";
+    const dados = { observacoes_requisicao: b.observacoes || ordem.observacoes_requisicao };
+    if (ordem.requisicao_estado === "pendente" || precisaAprovar) {
+      dados.requisicao_estado = "requisitada";
+    }
+    if (b.solicitado_por) dados.solicitado_por = b.solicitado_por;
+    if (precisaAprovar) dados.permitido_por = null;
+    await ordem.update(dados, { transaction: t });
+
+    await t.commit();
+    notificacoesService.criar({
+      organizacaoId: req.organizacao_id,
+      tipo: "producao",
+      nivel: "warning",
+      icone: "pending_actions",
+      titulo: `Material adicional solicitado — OP ${ordem.numero || ordem.id}`,
+      descricao: `${ordem.cliente?.nome ? `Cliente: ${ordem.cliente.nome} · ` : ""}${ordem.produto || "Produção"} — ${pedido.length} material(is) acrescentado(s) durante a produção.`,
+      link: "/producao",
+      usuarioId: req.usuario.id,
+    });
+    const completa = await OrdemProducao.findByPk(ordem.id, { include: includeOrdem() });
+    return res.status(201).json(completa);
+  } catch (e) {
+    await t.rollback();
+    console.error("Erro ao complementar materiais:", e);
+    return res.status(500).json({ erro: "Erro ao complementar materiais" });
   }
 };
 
@@ -302,7 +439,9 @@ exports.libertarParaMaquina = async (req, res) => {
       await t.rollback();
       return res.status(404).json({ erro: "Ordem não encontrada" });
     }
-    if (ordem.requisicao_estado !== "libertada") {
+    // OPs sem materiais avançam livremente; OPs com materiais ficam
+    // exclusivamente a aguardar a saída até à libertação.
+    if (!(await podeAvancar(ordem.id, req.organizacao_id, t))) {
       await t.rollback();
       return res.status(422).json({
         erro: "Os materiais desta OP ainda não foram libertados. Faça primeiro a saída de materiais.",
@@ -427,6 +566,20 @@ exports.finalizarProducao = async (req, res) => {
       const completa = await OrdemProducao.findByPk(ordem.id, { include: includeOrdem() });
       return res.json(completa);
     }
+    // Uma OP só é dada como final com todos os processos realmente concluídos.
+    // Esta rota serve para fechar a OP depois de a qualidade estar aprovada
+    // (a finalização automática também ocorre em salvarQualidade).
+    const pendentes = [];
+    if (!ordem.pre_impressao_ok) pendentes.push("pré-impressão");
+    if (!ordem.impressao_ok) pendentes.push("impressão");
+    if (!ordem.acabamento_ok) pendentes.push("acabamento");
+    if (!ordem.qualidade_ok) pendentes.push("qualidade");
+    if (pendentes.length) {
+      await t.rollback();
+      return res.status(422).json({
+        erro: `Ainda não é possível finalizar: processo(s) por concluir — ${pendentes.join(", ")}. A OP passa a Finalizada automaticamente quando a qualidade for aprovada.`,
+      });
+    }
     if (!(await podeAvancar(ordem.id, req.organizacao_id, t))) {
       await t.rollback();
       return res.status(422).json({
@@ -439,17 +592,7 @@ exports.finalizarProducao = async (req, res) => {
       transaction: t,
       motivo: "Baixa automática — produção finalizada",
     });
-    await ordem.update(
-      {
-        estado: "finalizado",
-        progresso: 100,
-        pre_impressao_ok: true,
-        impressao_ok: true,
-        acabamento_ok: true,
-        qualidade_ok: true,
-      },
-      { transaction: t }
-    );
+    await ordem.update({ estado: "finalizado", progresso: 100 }, { transaction: t });
     await t.commit();
     await registarProcesso(ordem.id, "qualidade", {
       resultado: "aprovado",
@@ -541,6 +684,11 @@ exports.salvarPreImpressao = async (req, res) => {
 exports.salvarImpressao = async (req, res) => {
   try {
     const { ordem_producao_id } = req.params;
+    if (!(await podeAvancar(ordem_producao_id, req.organizacao_id))) {
+      return res.status(422).json({
+        erro: "Os materiais desta OP ainda não foram libertados pelo estoque. Faça a saída dos materiais antes de registar a impressão.",
+      });
+    }
     const dados = {};
     Object.entries(MAPA_IMP).forEach(([chave, campo]) => {
       const v = req.body[chave];
@@ -601,6 +749,14 @@ exports.salvarAcabamento = async (req, res) => {
         .map(([servico, estado]) => ({ servico, estado: estado || "pendente" }));
     }
     if (servicos && servicos.length) {
+      // Confirma o pedido ANTES de gravar: se a OP estiver bloqueada por
+      // material, não se apaga o acabamento anterior para nada.
+      const entradaConcluida = servicos.every((s) => (s.estado || "pendente") === "concluido");
+      if (entradaConcluida && !(await podeAvancar(ordem_producao_id, req.organizacao_id))) {
+        return res.status(422).json({
+          erro: "Os materiais desta OP ainda não foram libertados pelo estoque. Faça a saída dos materiais antes de concluir o acabamento.",
+        });
+      }
       await Acabamento.update({ deleted: 1, deletedAt: new Date() }, { where: { ordem_producao_id, organizacao_id: req.organizacao_id } });
       const items = servicos.map((s) => ({
         organizacao_id: req.organizacao_id,
@@ -614,6 +770,7 @@ exports.salvarAcabamento = async (req, res) => {
         observacoes: meta.observacoes,
       }));
       const criados = await Acabamento.bulkCreate(items);
+      // Aqui vale o que ficou gravado, não o que foi pedido.
       const todosConcluidos = criados.length > 0 && criados.every((c) => c.estado === "concluido");
       await OrdemProducao.update({ acabamento_ok: todosConcluidos }, { where: { id: ordem_producao_id } });
       await registarProcesso(ordem_producao_id, "acabamento", {

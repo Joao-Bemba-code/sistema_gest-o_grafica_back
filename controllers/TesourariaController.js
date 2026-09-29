@@ -4,9 +4,17 @@ const { gerarExcel } = require("../services/tesourariaExcel");
 
 const ESTADOS = ["pendente", "confirmado", "cancelado"];
 const TIPOS = ["entrada", "saida", "transferencia"];
-const CATEGORIAS_ENTRADA = ["venda", "servico", "devolucao", "comissao", "deposito"];
-const CATEGORIAS_SAIDA = ["compra", "despesa", "salario", "imposto", "aluguel", "utilidades", "emprestimo", "levantamento"];
-const CATEGORIAS_TRANSFERENCIA = ["transferencia_interna"];
+
+function normalizarCategoria(tipo, valor) {
+  const texto = String(valor || "").trim().slice(0, 100);
+  if (!texto) {
+    return tipo === "entrada" ? "venda" : tipo === "saida" ? "despesa" : "transferencia_interna";
+  }
+  // “Comissão” escrita à mão continua a ser contabilizada como comissão.
+  const canonica = texto.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  if (canonica === "comissao") return "comissao";
+  return texto;
+}
 
 function resolverClienteId(body) {
   if (body.cliente_id) return body.cliente_id;
@@ -74,27 +82,16 @@ exports.criar = async (req, res) => {
     } = req.body;
 
     if (!tipo || !TIPOS.includes(tipo)) return res.status(400).json({ erro: "Tipo de movimento inválido" });
-    if (tipo === "entrada" && categoria !== "comissao") {
-      return res.status(400).json({ erro: "Entradas só podem ser registadas manualmente para comissões. Para vendas, marque a fatura como paga." });
-    }
+    const categoriaFinal = normalizarCategoria(tipo, categoria);
     if (!descricao || !String(descricao).trim()) return res.status(400).json({ erro: "Descrição é obrigatória" });
     const valorNum = parseFloat(valor);
     if (!valorNum || valorNum <= 0) return res.status(400).json({ erro: "Valor deve ser maior que zero" });
-
-    if (categoria) {
-      const categoriasValidas = tipo === "entrada" ? CATEGORIAS_ENTRADA
-        : tipo === "saida" ? CATEGORIAS_SAIDA
-        : CATEGORIAS_TRANSFERENCIA;
-      if (!categoriasValidas.includes(categoria)) {
-        return res.status(400).json({ erro: `Categoria "${categoria}" não é válida para o tipo "${tipo}"` });
-      }
-    }
 
     const movimento = await TesourariaMovimento.create({
       organizacao_id: req.organizacao_id,
       usuario_id: req.usuario.id,
       tipo,
-      categoria: categoria || (tipo === "entrada" ? "venda" : tipo === "saida" ? "despesa" : "transferencia_interna"),
+      categoria: categoriaFinal,
       descricao: String(descricao).trim(),
       valor: valorNum,
       data_movimento: data_movimento || new Date().toISOString().split("T")[0],
@@ -156,8 +153,8 @@ exports.atualizar = async (req, res) => {
     delete dados.organizacao_id;
     delete dados.usuario_id;
     if (dados.tipo && !TIPOS.includes(dados.tipo)) delete dados.tipo;
-    if (dados.tipo === "entrada") {
-      return res.status(400).json({ erro: "Entradas não podem ser registadas manualmente. Marque a fatura como paga para gerar a entrada automaticamente." });
+    if (dados.categoria !== undefined) {
+      dados.categoria = normalizarCategoria(dados.tipo || movimento.tipo, dados.categoria);
     }
     if (dados.estado && !ESTADOS.includes(dados.estado)) delete dados.estado;
     await movimento.update(dados);

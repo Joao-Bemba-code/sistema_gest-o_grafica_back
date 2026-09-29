@@ -12,19 +12,30 @@ app.use((err, req, res, next) => {
 
 const PORTA = process.env.port || 8000;
 
-sequelize
-  .sync({ alter: true })
-  .then(async () => {
-    if ((process.env.Lang || "mysql").toLowerCase() !== "sqlite") {
-      const { aplicarMigracoesMysql } = require("./migrarMysql");
-      await aplicarMigracoesMysql(sequelize);
+(async () => {
+  const usaMysql = (process.env.Lang || "mysql").toLowerCase() !== "sqlite";
+  if (usaMysql) {
+    try {
+      const { prepararSchemaAntesSync } = require("./migrarMysql");
+      await prepararSchemaAntesSync(sequelize);
+    } catch (e) {
+      console.error("Erro na preparação pré-sync:", e.message);
     }
-    const { inicializarSincronizacao } = require("./services/sincronizacao");
-    await inicializarSincronizacao();
-    app.listen(PORTA, () => {
-      console.log(`Servidor rodando na porta ${PORTA}`);
-    });
-  })
-  .catch((e) => {
-    console.error("Erro ao conectar ao banco:", e);
+  }
+
+  await sequelize.sync({ alter: true });
+
+  if (usaMysql) {
+    const { aplicarMigracoesMysql } = require("./migrarMysql");
+    await aplicarMigracoesMysql(sequelize);
+  }
+  const { inicializarSincronizacao } = require("./services/sincronizacao");
+  await inicializarSincronizacao();
+  const { iniciarPollingAGT } = require("./services/agtPolling");
+  iniciarPollingAGT();
+  app.listen(PORTA, () => {
+    console.log(`Servidor rodando na porta ${PORTA}`);
   });
+})().catch((e) => {
+  console.error("Erro ao conectar ao banco:", e);
+});

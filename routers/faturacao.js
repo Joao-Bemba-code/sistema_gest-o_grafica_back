@@ -5,6 +5,12 @@ const requirePermissao = require("../protect/perm");
 
 router.use(auth);
 
+router.get("/agt/config", requirePermissao("faturacao", "ver"), FaturacaoController.agtConfig);
+router.get("/agt/series", requirePermissao("faturacao", "ver"), FaturacaoController.listarSeries);
+router.post("/agt/serie", requirePermissao("faturacao", "criar"), FaturacaoController.solicitarSerie);
+router.post("/agt/consultar/:id", requirePermissao("faturacao", "ver"), FaturacaoController.consultarEstado);
+router.post("/agt/enviar/:id", requirePermissao("faturacao", "criar"), FaturacaoController.enviarAGT);
+
 router.get("/exportar", requirePermissao("faturacao", "ver"), FaturacaoController.exportar);
 router.get("/", requirePermissao("faturacao", "ver"), FaturacaoController.listar);
 router.get("/:id", requirePermissao("faturacao", "ver"), FaturacaoController.buscar);

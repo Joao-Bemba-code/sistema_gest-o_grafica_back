@@ -1,4 +1,6 @@
-const { Faturacao, Cliente, Orcamento, OrcamentoItem, OrdemProducao, TesourariaMovimento, ContaBancaria } = require("../models");
+const { Faturacao, Cliente, Orcamento, OrcamentoItem, OrdemProducao, TesourariaMovimento, ContaBancaria, Organizacao, SerieAGT } = require("../models");
+const agtClient = require("../services/agtClient");
+const { configAGT, agtPronto } = require("../services/agtConfig");
 
 const ESTADOS = ["emitida", "paga", "parcial", "vencida", "cancelada"];
 const TIPOS = ["fatura", "recibo", "proforma", "nota_credito", "factura_recibo"];
@@ -118,6 +120,165 @@ async function resolverCliente(req, body) {
   return null;
 }
 
+function arredondarExcesso(valor) {
+  return Math.ceil((Number(valor) + Number.EPSILON) * 100) / 100;
+}
+
+function montarDocumentoAGT(fatura, cliente, nif, serie) {
+  const cfg = configAGT();
+  const numero = String(serie.nextDocumentNo);
+  const documentNo = `${serie.documentType} ${serie.seriesCode}/${numero}`;
+  const netTotal = Number(fatura.subtotal) || 0;
+  const taxPayable = Number(fatura.valor_iva) || 0;
+  const grossTotal = Number(fatura.total) || Number((netTotal + taxPayable).toFixed(2));
+  const percentual = parseFloat(fatura.iva);
+  const pctFinal = !isNaN(percentual) ? percentual : cfg.ivaDefault;
+
+  const linhas = (fatura.itens || []).map((i, idx) => {
+    const quantidade = Number(i.quantidade) || 0;
+    const preco = Number(i.preco_unit) || 0;
+    const total = Number(i.total) || Number((quantidade * preco).toFixed(2));
+    return {
+      lineNumber: idx + 1,
+      operationType: "TB",
+      productCode: String(i.sku || i.codigo || `ITEM${idx + 1}`).slice(0, 60),
+      productDescription: String(i.descricao || "Serviço").slice(0, 200),
+      quantity: quantidade,
+      unitOfMeasure: "UN",
+      unitPriceBase: preco,
+      unitPrice: preco,
+      debitAmount: Number(total.toFixed(2)),
+      settlementAmount: 0,
+      taxes: [],
+    };
+  });
+
+  const somaBase = linhas.reduce((s, l) => s + l.debitAmount, 0);
+  let taxaRestante = taxPayable;
+  linhas.forEach((l, idx) => {
+    let contribuicao = 0;
+    if (somaBase > 0) {
+      contribuicao = idx === linhas.length - 1 ? Number(taxaRestante.toFixed(2)) : arredondarExcesso(taxPayable * (l.debitAmount / somaBase));
+      taxaRestante = Number((taxaRestante - contribuicao).toFixed(2));
+    }
+    l.taxes =
+      contribuicao > 0
+        ? [{ taxType: "IVA", taxCountryRegion: "AO", taxCode: "NOR", taxPercentage: pctFinal, taxContribution: Number(contribuicao.toFixed(2)) }]
+        : [{ taxType: "NS", taxCountryRegion: "AO", taxPercentage: 0 }];
+  });
+
+  const customerTaxID = cliente?.nif ? String(cliente.nif).trim() : "999999999";
+  const companyName = String(cliente?.nome || fatura.cliente || "Consumidor Final").slice(0, 200);
+  const documentTotals = {
+    taxPayable: Number(taxPayable.toFixed(2)),
+    netTotal: Number(netTotal.toFixed(2)),
+    grossTotal: Number(grossTotal.toFixed(2)),
+  };
+
+  const documento = {
+    documentNo,
+    documentStatus: "N",
+    documentDate: fatura.data_emissao,
+    documentType: serie.documentType,
+    systemEntryDate: new Date().toISOString().slice(0, 19),
+    customerTaxID,
+    customerCountry: "AO",
+    companyName,
+    lines: linhas,
+    documentTotals,
+  };
+
+  documento.jwsDocumentSignature = agtClient.assinarDocumento(
+    {
+      documentNo,
+      taxRegistrationNumber: nif,
+      documentType: serie.documentType,
+      documentDate: fatura.data_emissao,
+      customerTaxID,
+      customerCountry: "AO",
+      companyName,
+      documentTotals,
+    },
+    configAGT()
+  );
+
+  if (cfg.eacCode) documento.eacCode = cfg.eacCode;
+  return documento;
+}
+
+async function registarSerieAGT(organizacao_id, dados, cfg) {
+  const r = dados?.seriesFEResult;
+  if (!r?.seriesCode) return null;
+  return SerieAGT.create({
+    organizacao_id,
+    seriesCode: r.seriesCode,
+    documentType: dados.documentType || "FT",
+    seriesYear: dados.seriesYear || new Date().getFullYear(),
+    establishmentNumber: dados.establishmentNumber || cfg.establishment,
+    contingencyIndicator: dados.seriesContingencyIndicator || "N",
+    firstDocumentNo: r.firstDocumentNo || "1",
+    lastDocumentNo: r.lastDocumentNo || r.firstDocumentNo || "1",
+    nextDocumentNo: parseInt(r.firstDocumentNo, 10) || 1,
+    status: "A",
+  });
+}
+
+async function obterOuCriarSerieFT(organizacao, nif, cfg) {
+  const ano = new Date().getFullYear();
+  const onde = { organizacao_id: organizacao.id, documentType: "FT", seriesYear: ano, contingencyIndicator: "N" };
+  const serie = await SerieAGT.findOne({ where: onde, order: [["createdAt", "DESC"]] });
+  if (serie && serie.nextDocumentNo <= parseInt(serie.lastDocumentNo, 10)) return serie;
+  const { status, dados } = await agtClient.solicitarSerie({
+    nif,
+    establishment: cfg.establishment,
+    seriesYear: ano,
+    documentType: "FT",
+    contingencyIndicator: "N",
+  });
+  if (status === 200 && dados?.seriesFEResult?.seriesCode) {
+    return registarSerieAGT(organizacao.id, { ...dados, documentType: "FT", seriesYear: ano, establishmentNumber: cfg.establishment, seriesContingencyIndicator: "N" }, cfg);
+  }
+  const erro = new Error("AGT: falha ao solicitar série de faturação");
+  erro.detalhes = dados;
+  erro.statusAGT = status;
+  throw erro;
+}
+
+async function submitFaturaAGT(fatura) {
+  const cfg = configAGT();
+  if (!agtPronto()) return null;
+  const organizacao = await Organizacao.findByPk(fatura.organizacao_id);
+  if (!organizacao || !organizacao.nif) return null;
+  const nif = cfg.nif || String(organizacao.nif).trim();
+  const cliente = fatura.cliente_id ? await Cliente.findByPk(fatura.cliente_id) : null;
+  const serie = await obterOuCriarSerieFT(organizacao, nif, cfg);
+  const documento = montarDocumentoAGT(fatura, cliente, nif, serie);
+  const { status, dados } = await agtClient.registarFacturas({ nif, documentos: [documento] });
+  if (status === 200 && dados?.requestID) {
+    await fatura.update({ agt_document_no: documento.documentNo, agt_request_id: dados.requestID, agt_status: "pendente", agt_erros: null });
+    await SerieAGT.increment("nextDocumentNo", { where: { id: serie.id } });
+  } else {
+    await fatura.update({ agt_document_no: documento.documentNo, agt_erros: dados || { status } });
+  }
+  return { status, dados, documento };
+}
+
+async function atualizarEstadoAGT(fatura) {
+  const cfg = configAGT();
+  if (!agtPronto() || !fatura.agt_request_id) return null;
+  const organizacao = await Organizacao.findByPk(fatura.organizacao_id);
+  if (!organizacao || !organizacao.nif) return null;
+  const nif = cfg.nif || String(organizacao.nif).trim();
+  const { status, dados } = await agtClient.obterEstado({ nif, requestID: fatura.agt_request_id });
+  const linhas = status === 200 && Array.isArray(dados?.documentStatusList) ? dados.documentStatusList : [];
+  const linha = linhas.find((l) => l.documentNo === fatura.agt_document_no) || linhas[0];
+  if (linha) {
+    const novoEstado = linha.documentStatus === "V" ? "valida" : linha.documentStatus === "I" ? "invalida" : fatura.agt_status;
+    await fatura.update({ agt_status: novoEstado, agt_erros: linha.documentStatus === "I" ? linha.errorList || [] : null });
+  }
+  return { status, dados };
+}
+
 exports.listar = async (req, res) => {
   try {
     const { estado, tipo } = req.query;
@@ -216,6 +377,13 @@ async function criarRegisto(req, body) {
     conta_bancaria_id: body.conta_bancaria_id || null,
     observacoes: body.observacoes || null,
   });
+  if (tipo === "fatura" && agtPronto()) {
+    try {
+      await submitFaturaAGT(fatura);
+    } catch (eSubmit) {
+      console.error("AGT: falha ao submeter fatura automaticamente", eSubmit.detalhes || eSubmit.message);
+    }
+  }
   if (estado === "paga" && valorPago > 0) {
     await registarEntradaTesouraria(req, { ...fatura.toJSON(), data_pagamento: fatura.data_pagamento }, valorPago, fatura.metodo_pagamento, fatura.conta_bancaria_id);
   }
@@ -343,5 +511,125 @@ exports.remover = async (req, res) => {
   } catch (e) {
     console.error("Erro ao remover fatura:", e);
     return res.status(500).json({ erro: "Erro ao remover fatura" });
+  }
+};
+
+exports.agtConfig = async (req, res) => {
+  try {
+    const cfg = configAGT();
+    return res.json({
+      ativo: agtPronto(),
+      ambiente: cfg.ambiente,
+      baseUrl: cfg.baseUrl,
+      nif: cfg.nif,
+      establishment: cfg.establishment,
+      productId: cfg.productId,
+      productVersion: cfg.productVersion,
+      softwareValidationNumber: cfg.softwareValidationNumber,
+      eacCode: cfg.eacCode,
+      iva: cfg.ivaDefault,
+    });
+  } catch (e) {
+    console.error("Erro ao obter config AGT:", e);
+    return res.status(500).json({ erro: "Erro ao obter config AGT" });
+  }
+};
+
+exports.solicitarSerie = async (req, res) => {
+  try {
+    const organizacao = await Organizacao.findByPk(req.organizacao_id);
+    if (!organizacao || !organizacao.nif) {
+      return res.status(400).json({ erro: "NIF da organização não definido" });
+    }
+    if (!agtPronto()) return res.status(400).json({ erro: "AGT não configurado no .env" });
+    const cfg = configAGT();
+    const nif = cfg.nif || String(organizacao.nif).trim();
+    const ano = parseInt(req.body?.seriesYear, 10) || new Date().getFullYear();
+    const documentType = req.body?.documentType || "FT";
+    const resultado = await agtClient.solicitarSerie({
+      nif,
+      establishment: req.body?.establishment || cfg.establishment,
+      seriesYear: ano,
+      documentType,
+      contingencyIndicator: req.body?.contingency || "N",
+    });
+    if (resultado.status === 200 && resultado.dados?.seriesFEResult?.seriesCode) {
+      await registarSerieAGT(
+        organizacao.id,
+        {
+          ...resultado.dados,
+          documentType,
+          seriesYear: ano,
+          establishmentNumber: req.body?.establishment || cfg.establishment,
+          seriesContingencyIndicator: req.body?.contingency || "N",
+        },
+        cfg
+      );
+      return res.status(201).json(resultado.dados);
+    }
+    return res.status(resultado.status >= 400 ? resultado.status : 400).json(resultado.dados || { erro: "AGT: falha ao solicitar série" });
+  } catch (e) {
+    console.error("Erro ao solicitar série AGT:", e);
+    return res.status(500).json({ erro: "Erro ao solicitar série AGT", detalhes: e.detalhes || e.message });
+  }
+};
+
+exports.listarSeries = async (req, res) => {
+  try {
+    const organizacao = await Organizacao.findByPk(req.organizacao_id);
+    if (!organizacao || !organizacao.nif) {
+      return res.status(400).json({ erro: "NIF da organização não definido" });
+    }
+    if (!agtPronto()) return res.status(400).json({ erro: "AGT não configurado no .env" });
+    const cfg = configAGT();
+    const nif = cfg.nif || String(organizacao.nif).trim();
+    const criterios = {};
+    if (req.query?.seriesCode) criterios.seriesCode = req.query.seriesCode;
+    if (req.query?.seriesYear) criterios.seriesYear = req.query.seriesYear;
+    if (req.query?.documentType) criterios.documentType = req.query.documentType;
+    if (req.query?.seriesStatus) criterios.seriesStatus = req.query.seriesStatus;
+    const resultado = await agtClient.listarSeries({ nif, criterios });
+    if (resultado.status !== 200) {
+      return res.status(resultado.status >= 400 ? resultado.status : 400).json(resultado.dados || { erro: "AGT: falha ao listar séries" });
+    }
+    return res.json(resultado.dados);
+  } catch (e) {
+    console.error("Erro ao listar séries AGT:", e);
+    return res.status(500).json({ erro: "Erro ao listar séries AGT", detalhes: e.detalhes || e.message });
+  }
+};
+
+exports.consultarEstado = async (req, res) => {
+  try {
+    const fatura = await Faturacao.findOne({
+      where: { id: req.params.id, organizacao_id: req.organizacao_id },
+    });
+    if (!fatura) return res.status(404).json({ erro: "Fatura não encontrada" });
+    if (!fatura.agt_request_id) return res.status(400).json({ erro: "Fatura ainda não submetida à AGT" });
+    const agt_consulta = await atualizarEstadoAGT(fatura);
+    const completa = await Faturacao.findByPk(fatura.id, { include: [{ model: Cliente, required: false }] });
+    return res.json({ ...completa.toJSON(), agt_consulta });
+  } catch (e) {
+    console.error("Erro ao consultar estado AGT:", e);
+    return res.status(500).json({ erro: "Erro ao consultar estado AGT", detalhes: e.detalhes || e.message });
+  }
+};
+
+exports.enviarAGT = async (req, res) => {
+  try {
+    const fatura = await Faturacao.findOne({
+      where: { id: req.params.id, organizacao_id: req.organizacao_id },
+    });
+    if (!fatura) return res.status(404).json({ erro: "Fatura não encontrada" });
+    if (fatura.tipo !== "fatura") {
+      return res.status(400).json({ erro: "Apenas faturas (FT) são enviadas à AGT por agora" });
+    }
+    if (!agtPronto()) return res.status(400).json({ erro: "AGT não configurado no .env" });
+    const agt_envio = await submitFaturaAGT(fatura);
+    const completa = await Faturacao.findByPk(fatura.id, { include: [{ model: Cliente, required: false }] });
+    return res.json({ ...completa.toJSON(), agt_envio });
+  } catch (e) {
+    console.error("Erro ao enviar fatura à AGT:", e);
+    return res.status(500).json({ erro: "Erro ao enviar fatura à AGT", detalhes: e.detalhes || e.message });
   }
 };

@@ -47,8 +47,8 @@ const PERFIS = {
     label: "Produção",
     permissoes: {
       producao: { ver: true, criar: true, editar: true, eliminar: false, aprovar: false },
+      comercial: { ver: true, criar: false, editar: false, eliminar: false, aprovar: false },
       maquinas: { ver: false, criar: false, editar: true, eliminar: false, aprovar: false },
-      comercial: { ver: false, criar: false, editar: false, eliminar: false, aprovar: false },
       faturacao: { ver: false, criar: false, editar: false, eliminar: false, aprovar: false },
       tesouraria: { ver: false, criar: false, editar: false, eliminar: false, aprovar: false },
       estoque: { ver: false, criar: false, editar: false, eliminar: false, aprovar: false },

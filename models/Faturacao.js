@@ -30,6 +30,10 @@ const Faturacao = sequelize.define("faturacao", {
   conta_bancaria_id: { type: DataTypes.INTEGER },
   observacoes: { type: DataTypes.TEXT },
   usuario_id: { type: DataTypes.INTEGER },
+  agt_document_no: { type: DataTypes.STRING(60) },
+  agt_request_id: { type: DataTypes.STRING(15) },
+  agt_status: { type: DataTypes.ENUM("pendente", "valida", "invalida") },
+  agt_erros: { type: DataTypes.JSON },
   deleted: { type: DataTypes.BOOLEAN, defaultValue: false },
   deletedAt: { type: DataTypes.DATE, allowNull: true },
 }, {

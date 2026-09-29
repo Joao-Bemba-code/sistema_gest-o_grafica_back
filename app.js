@@ -50,6 +50,7 @@ function criarApp(opcoes = {}) {
     app.use("/api/configuracoes", require("./routers/configuracoes"));
     app.use("/api/fornecedores", require("./routers/fornecedores"));
     app.use("/api/pedidos", require("./routers/pedidos"));
+  app.use("/api/requisicoes-material", require("./routers/requisicoes-material"));
     app.use("/api/servicos", require("./routers/servicos"));
     app.use("/api/maquinas", require("./routers/maquinas"));
     app.use("/api/backup", require("./routers/backup"));

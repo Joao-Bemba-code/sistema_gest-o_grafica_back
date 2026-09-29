@@ -9,12 +9,10 @@ const TesourariaMovimento = sequelize.define("tesouraria_movimento", {
     type: DataTypes.ENUM("entrada", "saida", "transferencia"),
     allowNull: false,
   },
-categoria: {
-    type: DataTypes.ENUM(
-      "venda", "servico", "devolucao", "comissao",
-      "compra", "despesa", "salario", "imposto", "aluguel", "utilidades", "emprestimo",
-      "transferencia_interna", "deposito", "levantamento"
-    ),
+  // Categoria livre: o formulário sugere valores por tipo, mas também aceita
+  // texto digitado pelo utilizador.
+  categoria: {
+    type: DataTypes.STRING(100),
     defaultValue: "venda",
   },
   descricao: { type: DataTypes.STRING(300), allowNull: false },

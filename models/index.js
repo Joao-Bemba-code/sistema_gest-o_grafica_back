@@ -22,12 +22,15 @@ const Fornecedor = require("./Fornecedor");
 const Sequencia = require("./Sequencia");
 const Pedido = require("./Pedido");
 const PedidoItem = require("./PedidoItem");
+const RequisicaoMaterial = require("./RequisicaoMaterial");
+const RequisicaoMaterialItem = require("./RequisicaoMaterialItem");
 const OrcamentoServico = require("./OrcamentoServico");
 const Servico = require("./Servico");
 const Maquina = require("./Maquina");
 const Notificacao = require("./Notificacao");
 const ContaBancaria = require("./ContaBancaria");
 const TesourariaMovimento = require("./TesourariaMovimento");
+const SerieAGT = require("./SerieAGT");
 
 Organizacao.hasMany(Usuario, { foreignKey: "organizacao_id" });
 Usuario.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
@@ -121,6 +124,9 @@ Faturacao.belongsTo(Cliente, { foreignKey: "cliente_id" });
 OrdemProducao.hasMany(Faturacao, { foreignKey: "ordem_producao_id" });
 Faturacao.belongsTo(OrdemProducao, { foreignKey: "ordem_producao_id" });
 
+Organizacao.hasMany(SerieAGT, { foreignKey: "organizacao_id" });
+SerieAGT.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
+
 Organizacao.hasOne(Sistema, { foreignKey: "organizacao_id" });
 Sistema.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
 
@@ -136,6 +142,17 @@ Pedido.hasMany(PedidoItem, { foreignKey: "pedido_id" });
 PedidoItem.belongsTo(Pedido, { foreignKey: "pedido_id" });
 Material.hasMany(PedidoItem, { foreignKey: "material_id" });
 PedidoItem.belongsTo(Material, { foreignKey: "material_id" });
+
+Organizacao.hasMany(RequisicaoMaterial, { foreignKey: "organizacao_id" });
+RequisicaoMaterial.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
+Cliente.hasMany(RequisicaoMaterial, { foreignKey: "cliente_id" });
+RequisicaoMaterial.belongsTo(Cliente, { foreignKey: "cliente_id", as: "cliente" });
+RequisicaoMaterial.hasMany(RequisicaoMaterialItem, { foreignKey: "requisicao_id", as: "itens" });
+RequisicaoMaterialItem.belongsTo(RequisicaoMaterial, { foreignKey: "requisicao_id" });
+Material.hasMany(RequisicaoMaterialItem, { foreignKey: "material_id" });
+RequisicaoMaterialItem.belongsTo(Material, { foreignKey: "material_id" });
+Usuario.hasMany(RequisicaoMaterial, { foreignKey: "usuario_id" });
+RequisicaoMaterial.belongsTo(Usuario, { foreignKey: "usuario_id", as: "usuario" });
 
 Organizacao.hasMany(Notificacao, { foreignKey: "organizacao_id" });
 Notificacao.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
@@ -184,8 +201,11 @@ module.exports = {
   Sequencia,
   Pedido,
   PedidoItem,
+  RequisicaoMaterial,
+  RequisicaoMaterialItem,
   Maquina,
   Notificacao,
   ContaBancaria,
   TesourariaMovimento,
+  SerieAGT,
 };
