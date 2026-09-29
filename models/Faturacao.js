@@ -5,6 +5,7 @@ const Faturacao = sequelize.define("faturacao", {
   id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
   organizacao_id: { type: DataTypes.INTEGER, allowNull: false },
   orcamento_id: { type: DataTypes.INTEGER },
+  orcamentos_ids: { type: DataTypes.JSON },
   ordem_producao_id: { type: DataTypes.INTEGER },
   cliente_id: { type: DataTypes.INTEGER },
   tipo: {

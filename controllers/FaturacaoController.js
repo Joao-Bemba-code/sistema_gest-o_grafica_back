@@ -1,4 +1,5 @@
 const { Faturacao, Cliente, Orcamento, OrcamentoItem, OrdemProducao, TesourariaMovimento, ContaBancaria, Organizacao, SerieAGT } = require("../models");
+const { Op } = require("sequelize");
 const agtClient = require("../services/agtClient");
 const { configAGT, agtPronto } = require("../services/agtConfig");
 
@@ -337,6 +338,62 @@ exports.exportar = async (req, res) => {
   }
 };
 
+/**
+ * Resolve e valida os orçamentos ligados à fatura (um ou vários).
+ * Devolve { ids, orcamentos, clienteId } ou lança erro com status 422 quando:
+ * algum não existe, pertencem a clientes diferentes ou já foram facturados
+ * (faturas canceladas não bloqueiam).
+ */
+async function resolverOrcamentosFatura(req, body, clienteBase) {
+  let ids = Array.isArray(body.orcamentos_ids)
+    ? body.orcamentos_ids.map((v) => parseInt(v, 10)).filter((v) => Number.isInteger(v) && v > 0)
+    : [];
+  ids = [...new Set(ids)];
+  if (!ids.length && body.orcamento_id) {
+    const unico = parseInt(body.orcamento_id, 10);
+    if (Number.isInteger(unico) && unico > 0) ids = [unico];
+  }
+  if (!ids.length) return { ids, orcamentos: [], clienteId: clienteBase };
+
+  const orcamentos = await Orcamento.findAll({
+    where: { id: ids, organizacao_id: req.organizacao_id },
+  });
+  if (orcamentos.length !== ids.length) {
+    const erro = new Error("Um ou mais orçamentos indicados não foram encontrados");
+    erro.status = 422;
+    throw erro;
+  }
+  const clientes = [...new Set(orcamentos.map((o) => Number(o.cliente_id) || 0))];
+  if (clientes.length > 1) {
+    const erro = new Error("Todos os orçamentos devem pertencer ao mesmo cliente");
+    erro.status = 422;
+    throw erro;
+  }
+  if (clienteBase && clientes[0] && Number(clienteBase) !== clientes[0]) {
+    const erro = new Error("Os orçamentos selecionados pertencem a outro cliente");
+    erro.status = 422;
+    throw erro;
+  }
+
+  const existentes = await Faturacao.findAll({
+    where: { organizacao_id: req.organizacao_id, estado: { [Op.ne]: "cancelada" } },
+    attributes: ["id", "numero", "orcamento_id", "orcamentos_ids"],
+  });
+  const facturados = new Set();
+  for (const f of existentes) {
+    if (f.orcamento_id) facturados.add(Number(f.orcamento_id));
+    for (const vid of Array.isArray(f.orcamentos_ids) ? f.orcamentos_ids : []) facturados.add(Number(vid));
+  }
+  const repetidos = ids.filter((id) => facturados.has(id));
+  if (repetidos.length) {
+    const erro = new Error(`Orçamento(s) já facturado(s): ${repetidos.join(", ")}`);
+    erro.status = 422;
+    throw erro;
+  }
+
+  return { ids, orcamentos, clienteId: clienteBase || clientes[0] || null };
+}
+
 async function criarRegisto(req, body) {
   const tipo = TIPOS.includes(body.tipo) ? body.tipo : "fatura";
   const itens = normalizarItens(body.itens);
@@ -346,7 +403,12 @@ async function criarRegisto(req, body) {
   const dataEmissao = body.data_emissao || hojeStr;
   const dataVencimento =
     body.data_vencimento || new Date(hoje.getTime() + 30 * 86400000).toISOString().split("T")[0];
-  const clienteId = await resolverCliente(req, body);
+  const clienteBase = await resolverCliente(req, body);
+  const ligados = await resolverOrcamentosFatura(req, body, clienteBase);
+  const clienteId = ligados.clienteId;
+  const origem = ligados.orcamentos.length
+    ? `Origem: ${ligados.orcamentos.map((o) => o.numero || o.id).join(", ")}`
+    : "";
   let valorPago = parseFloat(body.valor_pago) || 0;
   let estado = ESTADOS.includes(body.estado) ? body.estado : null;
   if (tipo === "factura_recibo") {
@@ -360,7 +422,8 @@ async function criarRegisto(req, body) {
   const fatura = await Faturacao.create({
     organizacao_id: req.organizacao_id,
     usuario_id: req.usuario.id,
-    orcamento_id: body.orcamento_id || null,
+    orcamento_id: ligados.ids.length === 1 ? ligados.ids[0] : null,
+    orcamentos_ids: ligados.ids.length ? ligados.ids : null,
     ordem_producao_id: body.op || body.ordem_producao_id || null,
     cliente_id: clienteId,
     tipo,
@@ -375,7 +438,7 @@ async function criarRegisto(req, body) {
     estado,
     metodo_pagamento: body.metodo || body.metodo_pagamento || null,
     conta_bancaria_id: body.conta_bancaria_id || null,
-    observacoes: body.observacoes || null,
+    observacoes: body.observacoes ? `${body.observacoes}${origem ? ` · ${origem}` : ""}` : origem || null,
   });
   if (tipo === "fatura" && agtPronto()) {
     try {
@@ -395,6 +458,7 @@ exports.criar = async (req, res) => {
     const completa = await criarRegisto(req, req.body || {});
     return res.status(201).json(completa);
   } catch (e) {
+    if (e.status) return res.status(e.status).json({ erro: e.message });
     console.error("Erro ao criar fatura:", e);
     return res.status(500).json({ erro: "Erro ao criar fatura" });
   }
@@ -422,11 +486,11 @@ exports.fromOrcamento = async (req, res) => {
       iva: ivaPct,
       total: Number(orcamento.total_com_iva) || 0,
       data_emissao: new Date().toISOString().split("T")[0],
-      observacoes: `Facturado a partir do orçamento ${orcamento.numero}`,
     };
     const completa = await criarRegisto(req, body);
     return res.status(201).json(completa);
   } catch (e) {
+    if (e.status) return res.status(e.status).json({ erro: e.message });
     console.error("Erro ao faturar orçamento:", e);
     return res.status(500).json({ erro: "Erro ao faturar orçamento" });
   }

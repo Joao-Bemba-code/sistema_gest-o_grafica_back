@@ -8,6 +8,7 @@ router.use(auth);
 router.get("/", requirePermissao("comercial", "ver"), OrcamentoController.listar);
 router.get("/:id", requirePermissao("comercial", "ver"), OrcamentoController.buscarPorId);
 router.post("/", requirePermissao("comercial", "criar"), OrcamentoController.criar);
+router.post("/:id/enviar-producao", requirePermissao("comercial", "editar"), OrcamentoController.enviarProducao);
 router.put("/:id", requirePermissao("comercial", "editar"), OrcamentoController.atualizar);
 router.delete("/:id", requirePermissao("comercial", "eliminar"), OrcamentoController.remover);
 

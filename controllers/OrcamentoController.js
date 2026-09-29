@@ -1,7 +1,8 @@
-const { sequelize, Orcamento, OrcamentoItem, OrcamentoMaterial, OrcamentoServico, Cliente, Sequencia, OrdemProducao, PreImpressao } = require("../models");
+const { sequelize, Orcamento, OrcamentoItem, OrcamentoMaterial, OrcamentoServico, Cliente, Sequencia, OrdemProducao, PreImpressao, Usuario } = require("../models");
 const { Transaction } = require("sequelize");
 const validador = require("../validators/orcamento");
 const estoqueService = require("../services/estoque");
+const notificacoesService = require("../services/notificacoes");
 
 const ESTADOS = ["pendente", "aprovado", "cancelado", "rejeitado"];
 
@@ -216,7 +217,27 @@ function serializar(o) {
     prazoExecucao: o.prazo_execucao,
     condicoesPagamento: o.condicoes_pagamento,
     observacoes: o.observacoes,
+    ordem_producao: o.ordem_producao
+      ? { id: o.ordem_producao.id, numero: o.ordem_producao.numero, estado: o.ordem_producao.estado }
+      : null,
   };
+}
+
+// Mapa orcamento_id -> ordem de produção (para o serializar saber se já existe OP).
+async function buscarOrdensMapa(orcamentos, organizacao_id) {
+  if (!orcamentos || !orcamentos.length) return new Map();
+  const ids = orcamentos.map((o) => o.id);
+  const ordens = await OrdemProducao.findAll({
+    where: { organizacao_id, orcamento_id: ids },
+    attributes: ["id", "orcamento_id", "numero", "estado"],
+  });
+  return new Map(ordens.map((op) => [op.orcamento_id, op]));
+}
+
+function comOrdemProducao(orcamento, mapa) {
+  const dados = orcamento.toJSON ? orcamento.toJSON() : orcamento;
+  dados.ordem_producao = mapa.get(orcamento.id) || null;
+  return dados;
 }
 
 async function proximoNumero(organizacao_id) {
@@ -277,6 +298,7 @@ async function criarOrdemProducaoAuto(orcamento, organizacaoId, usuarioId) {
 
   if (materiaisMap.size) {
     const t = await sequelize.transaction();
+    let reservou = false;
     try {
       await estoqueService.reservarMateriais({
         organizacaoId,
@@ -286,9 +308,38 @@ async function criarOrdemProducaoAuto(orcamento, organizacaoId, usuarioId) {
         transaction: t,
       });
       await t.commit();
+      reservou = true;
     } catch (erroReserva) {
       await t.rollback();
       console.warn(`[OP automática] reserva de materiais falhou (orçamento ${orcamento.numero}):`, erroReserva.message);
+    }
+
+    // Orçamentos de composição (materiais do estoque): a OP fica a aguardar a
+    // libertação do material pelo estoque. Se a reserva falhou, fica "pendente"
+    // para a produção poder submeter a requisição de material normalmente.
+    if (reservou) {
+      let nomeSolicitante = null;
+      try {
+        const usr = await Usuario.findByPk(usuarioId, { attributes: ["id", "nome"] });
+        nomeSolicitante = usr ? usr.nome : null;
+      } catch (e) {
+        console.warn("[OP automática] não foi possível obter o nome do utilizador:", e.message);
+      }
+      await ordem.update({
+        requisicao_estado: "requisitada",
+        solicitado_por: nomeSolicitante,
+        observacoes: `Gerada automaticamente a partir do orçamento ${orcamento.numero}. Aguardando libertação de material do estoque.`,
+      });
+      notificacoesService.criar({
+        organizacaoId,
+        tipo: "producao",
+        nivel: "warning",
+        icone: "pending_actions",
+        titulo: `Requisição de material pendente de aprovação — OP ${ordem.numero || ordem.id}`,
+        descricao: `${produto} (${quantidade}) — gerada a partir do orçamento ${orcamento.numero}. Aguarda libertação de material do estoque.`,
+        link: "/producao",
+        usuarioId,
+      });
     }
   }
   return ordem;
@@ -304,7 +355,8 @@ exports.listar = async (req, res) => {
       include: includeCompleto(),
       order: [["createdAt", "DESC"]],
     });
-    return res.json(orcamentos.map(serializar));
+    const mapa = await buscarOrdensMapa(orcamentos, req.organizacao_id);
+    return res.json(orcamentos.map((o) => serializar(comOrdemProducao(o, mapa))));
   } catch (e) {
     console.error("Erro ao listar orçamentos:", e);
     return res.status(500).json({ erro: "Erro ao listar orçamentos" });
@@ -318,7 +370,8 @@ exports.buscarPorId = async (req, res) => {
       include: includeCompleto(),
     });
     if (!orcamento) return res.status(404).json({ erro: "Orçamento não encontrado" });
-    return res.json(serializar(orcamento));
+    const mapa = await buscarOrdensMapa([orcamento], req.organizacao_id);
+    return res.json(serializar(comOrdemProducao(orcamento, mapa)));
   } catch (e) {
     console.error("Erro ao buscar orçamento:", e);
     return res.status(500).json({ erro: "Erro ao buscar orçamento" });
@@ -355,10 +408,11 @@ exports.criar = async (req, res) => {
     }
     await recalcularTotais(orcamento.id);
     const completo = await Orcamento.findByPk(orcamento.id, { include: includeCompleto() });
-    if (orcamento.estado === "aprovado") {
+    if (orcamento.estado === "aprovado" && req.body.gerar_op === true) {
       await criarOrdemProducaoAuto(completo, req.organizacao_id, req.usuario.id);
     }
-    return res.status(201).json(serializar(completo));
+    const mapa = await buscarOrdensMapa([completo], req.organizacao_id);
+    return res.status(201).json(serializar(comOrdemProducao(completo, mapa)));
   } catch (e) {
     console.error("Erro ao criar orçamento:", e);
     return res.status(500).json({ erro: "Erro ao criar orçamento" });
@@ -376,7 +430,7 @@ exports.atualizar = async (req, res) => {
     delete dados.numero;
     const estadoAnterior = orcamento.estado;
     await orcamento.update(dados);
-    if (orcamento.estado === "aprovado" && estadoAnterior !== "aprovado") {
+    if (orcamento.estado === "aprovado" && estadoAnterior !== "aprovado" && req.body.gerar_op === true) {
       await criarOrdemProducaoAuto(orcamento, req.organizacao_id, req.usuario.id);
     }
     if (req.body.itens) {
@@ -402,10 +456,40 @@ exports.atualizar = async (req, res) => {
     }
     await recalcularTotais(orcamento.id);
     const completo = await Orcamento.findByPk(orcamento.id, { include: includeCompleto() });
-    return res.json(serializar(completo));
+    const mapa = await buscarOrdensMapa([completo], req.organizacao_id);
+    return res.json(serializar(comOrdemProducao(completo, mapa)));
   } catch (e) {
     console.error("Erro ao atualizar orçamento:", e);
     return res.status(500).json({ erro: "Erro ao atualizar orçamento" });
+  }
+};
+
+// Envia manualmente um orçamento para produção (cria a OP se ainda não existir).
+exports.enviarProducao = async (req, res) => {
+  try {
+    const orcamento = await Orcamento.findOne({
+      where: { id: req.params.id, organizacao_id: req.organizacao_id },
+      include: includeCompleto(),
+    });
+    if (!orcamento) return res.status(404).json({ erro: "Orçamento não encontrado" });
+    const existente = await OrdemProducao.findOne({
+      where: { orcamento_id: orcamento.id, organizacao_id: req.organizacao_id },
+    });
+    if (existente) {
+      return res.json({
+        mensagem: "Este orçamento já tem uma ordem de produção",
+        ordem: { id: existente.id, numero: existente.numero, estado: existente.estado },
+      });
+    }
+    const ordem = await criarOrdemProducaoAuto(orcamento, req.organizacao_id, req.usuario.id);
+    if (!ordem) return res.status(500).json({ erro: "Não foi possível criar a ordem de produção" });
+    return res.status(201).json({
+      mensagem: "Orçamento enviado para produção",
+      ordem: { id: ordem.id, numero: ordem.numero, estado: ordem.estado },
+    });
+  } catch (e) {
+    console.error("Erro ao enviar orçamento para produção:", e);
+    return res.status(500).json({ erro: "Erro ao enviar orçamento para produção" });
   }
 };
 

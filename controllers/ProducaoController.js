@@ -1,4 +1,4 @@
-const { sequelize, OrdemProducao, PreImpressao, Impressao, Acabamento, Qualidade, Cliente, Orcamento, OrcamentoItem, OrcamentoMaterial, ReservaEstoque, Maquina, Material } = require("../models");
+const { sequelize, OrdemProducao, PreImpressao, Impressao, Acabamento, Qualidade, Cliente, Orcamento, OrcamentoItem, OrcamentoMaterial, OrcamentoServico, ReservaEstoque, Maquina, Material } = require("../models");
 const estoqueService = require("../services/estoque");
 const notificacoesService = require("../services/notificacoes");
 
@@ -59,6 +59,7 @@ function includeOrdem() {
       { model: OrcamentoItem, required: false, separate: true, include: [
         { model: OrcamentoMaterial, as: "materiais", required: false, separate: true },
       ] },
+      { model: OrcamentoServico, as: "servicos", required: false, separate: true },
     ] },
     { model: PreImpressao, required: false, separate: true },
     { model: Impressao, required: false, separate: true },
