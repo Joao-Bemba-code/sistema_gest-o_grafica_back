@@ -1,24 +1,19 @@
 const ExcelJS = require("exceljs");
 
+// Estilo sóbrio: um único tom no cabeçalho e linhas brancas.
+// As colunas de texto têm a largura calculada a partir do conteúdo,
+// para cada valor caber na própria coluna sem aparecer "###".
 const COR = {
   cabecalhoFundo: "1F4E79",
   cabecalhoTexto: "FFFFFF",
-  banda: "F2F7FB",
-  entradaFundo: "E8F5E9",
-  entradaTexto: "1B5E20",
-  saidaFundo: "FFEBEE",
-  saidaTexto: "B71C1C",
-  transfFundo: "E3F2FD",
-  transfTexto: "0D47A1",
-  totalEntradaFundo: "E2EFDA",
-  totalEntradaTexto: "375623",
-  totalSaidaFundo: "FCE4EC",
-  totalSaidaTexto: "B71C1C",
-  saldoDiaFundo: "FFF2CC",
-  saldoDiaTexto: "7F6000",
 };
 
-const LARGURAS = [12, 8, 14, 16, 34, 14, 14, 16, 20, 20, 20, 14, 18, 24, 30];
+const LETRAS = "ABCDEFGHIJKLMNO";
+
+// Larguras fixas para colunas de data/hora/valores (suficientes para o formato de moeda)
+const LARGURAS_FIXAS = { A: 12, B: 8, F: 20, G: 20, H: 20 };
+const LARGURA_MIN = 10;
+const LARGURA_MAX = 42;
 
 function fmtData(v) {
   if (!v) return null;
@@ -42,11 +37,38 @@ function sinalDe(tipo, valor) {
   return 0; // transferencia: não afecta o saldo acumulado global
 }
 
+// Calcula a largura de cada coluna de texto a partir do conteúdo real.
+// Colunas de data/hora/moeda mantêm a largura fixa definida acima.
+function calcularLarguras(ws, totalColunas) {
+  const larguras = new Array(totalColunas).fill(LARGURA_MIN);
+  ws.eachRow((row) => {
+    row.eachCell((cell, colNumber) => {
+      const idx = colNumber - 1;
+      if (LARGURAS_FIXAS[LETRAS[idx]]) return;
+      const v = cell.value;
+      if (v == null || v === "") return;
+      let t = "";
+      if (v instanceof Date) {
+        t = "00/00/0000";
+      } else if (typeof v === "object") {
+        if (v.richText) t = v.richText.map((r) => r.text).join("");
+        else if (v.result != null) t = String(v.result);
+        else t = "";
+      } else {
+        t = String(v);
+      }
+      const maiorLinha = t.split("\n").reduce((m, l) => Math.max(m, l.length), 0);
+      larguras[idx] = Math.max(larguras[idx], Math.min(maiorLinha + 2, LARGURA_MAX));
+    });
+  });
+  return larguras;
+}
+
 /**
- * Gera o ficheiro .xlsx formatado com a vista de tesouraria.
+ * Gera o ficheiro .xlsx com a vista de tesouraria.
  * Devolve um buffer pronto a enviar.
  */
-async function gerarExcel({ movimentos = [], contaId, saldoAnterior = 0, moeda = "KZ" }) {
+async function gerarExcel({ movimentos = [], contaId, saldoAnterior = 0, saldoAtual = 0, moeda = "KZ" }) {
   const wb = new ExcelJS.Workbook();
   wb.creator = "Sistema GSF";
   wb.created = new Date();
@@ -62,18 +84,16 @@ async function gerarExcel({ movimentos = [], contaId, saldoAnterior = 0, moeda =
     "Método de Pagamento", "Conta Origem", "Conta Destino",
     "Estado", "Referência", "Cliente", "Observações",
   ];
-  const cabecalhoLetras = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O"];
   const colEntrada = "F", colSaida = "G", colSaldo = "H";
 
-  // Cabeçalho
-  ws.columns = headers.map((h, i) => ({ header: h, key: `c${i}`, width: LARGURAS[i] }));
+  // Cabeçalho — as larguras das colunas de texto são recalculadas no fim
+  ws.columns = headers.map((h, i) => ({ header: h, key: `c${i}`, width: LARGURAS_FIXAS[LETRAS[i]] || LARGURA_MIN }));
   const header = ws.getRow(1);
-  header.height = 26;
+  header.height = 24;
   header.eachCell((cell) => {
     cell.font = { bold: true, color: { argb: COR.cabecalhoTexto }, size: 11 };
     cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: COR.cabecalhoFundo } };
     cell.alignment = { vertical: "middle", horizontal: "center" };
-    cell.border = { bottom: { style: "medium", color: { argb: "9BC2E6" } } };
   });
 
   let saldo = Number(saldoAnterior || 0);
@@ -104,40 +124,29 @@ async function gerarExcel({ movimentos = [], contaId, saldoAnterior = 0, moeda =
 
     const row = ws.addRow(valor);
     filaAtual = row.number;
-    row.height = 20;
-
-    // Cor por tipo (preenchimento forte)
-    let fundo = null, texto = "333333";
-    if (tipo === "entrada") { fundo = COR.entradaFundo; texto = COR.entradaTexto; }
-    else if (tipo === "saida") { fundo = COR.saidaFundo; texto = COR.saidaTexto; }
-    else if (tipo === "transferencia") { fundo = COR.transfFundo; texto = COR.transfTexto; }
-
-    if (fundo) {
-      row.eachCell((cell) => {
-        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: fundo } };
-      });
-    } else if (i % 2 === 1) {
-      row.eachCell((cell) => {
-        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: COR.banda } };
-      });
-    }
 
     row.eachCell((cell, colIdx) => {
-      cell.font = { color: { argb: texto }, size: 10 };
+      const letra = LETRAS[colIdx - 1];
+      cell.font = { size: 10 };
       cell.alignment = {
         vertical: "middle",
-        horizontal: [1, 2, 3, 12].includes(colIdx) ? "center" : "left",
-        wrapText: true,
+        horizontal: ["F", "G", "H"].includes(letra)
+          ? "right"
+          : ["A", "B", "C", "L", "M"].includes(letra)
+            ? "center"
+            : "left",
+        wrapText: !["A", "B", "F", "G", "H"].includes(letra),
       };
       if (cell.value === null) cell.value = "";
     });
 
-    // Moeda
+    // Formatos de data, hora e moeda (larguras fixas garantem que nunca fica "###")
+    row.getCell("A").numFmt = "dd/mm/yyyy";
+    row.getCell("B").numFmt = "hh:mm";
     ["F", "G", "H"].forEach((c) => {
-      const cell = row.getCell(c);
-      cell.numFmt = numFmt;
+      row.getCell(c).numFmt = numFmt;
     });
-    row.getCell(colSaldo).font = { bold: true, color: { argb: COR.cabecalhoFundo }, size: 10 };
+    row.getCell(colSaldo).font = { bold: true, size: 10 };
 
     // A partir da 2ª linha, o saldo acumulado torna-se fórmula (o Excel recalcula)
     if (i >= 1) {
@@ -156,23 +165,23 @@ async function gerarExcel({ movimentos = [], contaId, saldoAnterior = 0, moeda =
     const rTotE = ws.addRow({ c4: "TOTAL ENTRADAS", c5: { formula: `SUM(F2:F${filaAtual})` } });
     const rTotS = ws.addRow({ c4: "TOTAL SAÍDAS", c6: { formula: `SUM(G2:G${filaAtual})` } });
     const rSald = ws.addRow({ c4: "SALDO DO PERÍODO", c7: { formula: `H${filaAtual}` } });
+    const rSaldoAtual = ws.addRow({ c4: "SALDO ATUAL", c7: Number(saldoAtual || 0) });
 
-    const estiloTotal = (row, fundo, texto) => {
+    const estiloTotal = (row) => {
       row.height = 20;
       const e = row.getCell("E");
-      e.font = { bold: true, color: { argb: texto }, size: 11 };
+      e.font = { bold: true, size: 11 };
       e.alignment = { vertical: "middle", horizontal: "right" };
-      e.fill = { type: "pattern", pattern: "solid", fgColor: { argb: fundo } };
       ["F", "G", "H"].forEach((c) => {
         const cell = row.getCell(c);
-        cell.font = { bold: true, color: { argb: texto }, size: 11 };
+        cell.font = { bold: true, size: 11 };
         cell.numFmt = numFmt;
-        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: fundo } };
       });
     };
-    estiloTotal(rTotE, COR.totalEntradaFundo, COR.totalEntradaTexto);
-    estiloTotal(rTotS, COR.totalSaidaFundo, COR.totalSaidaTexto);
-    estiloTotal(rSald, COR.saldoDiaFundo, COR.saldoDiaTexto);
+    estiloTotal(rTotE);
+    estiloTotal(rTotS);
+    estiloTotal(rSald);
+    estiloTotal(rSaldoAtual);
 
     const exp = ws.addRow([]);
     exp.height = 4;
@@ -181,47 +190,16 @@ async function gerarExcel({ movimentos = [], contaId, saldoAnterior = 0, moeda =
     expRow.getCell(2).font = { italic: true, color: { argb: "808080" }, size: 9 };
   }
 
-  // Formatação condicional real
-  if (movimentos.length > 0) {
-    const ref = `A2:O${filaAtual}`;
-    ws.addConditionalFormatting({
-      ref,
-      rules: [
-        {
-          type: "expression",
-          formulae: [`$C2="Entrada"`],
-          priority: 1,
-          style: {
-            fill: { type: "pattern", pattern: "solid", bgColor: { argb: COR.entradaFundo }, fgColor: { argb: COR.entradaFundo } },
-            font: { color: { argb: COR.entradaTexto } },
-          },
-        },
-        {
-          type: "expression",
-          formulae: [`$C2="Saida"`],
-          priority: 2,
-          style: {
-            fill: { type: "pattern", pattern: "solid", bgColor: { argb: COR.saidaFundo }, fgColor: { argb: COR.saidaFundo } },
-            font: { color: { argb: COR.saidaTexto } },
-          },
-        },
-        {
-          type: "expression",
-          formulae: [`$C2="Transferencia"`],
-          priority: 3,
-          style: {
-            fill: { type: "pattern", pattern: "solid", bgColor: { argb: COR.transfFundo }, fgColor: { argb: COR.transfFundo } },
-            font: { color: { argb: COR.transfTexto } },
-          },
-        },
-      ],
-    });
-  }
-
   // Auto-filtro
   if (movimentos.length > 0) {
     ws.autoFilter = { from: "A1", to: `O${filaAtual}` };
   }
+
+  // Largura das colunas de texto conforme o conteúdo (cada palavra cabe na sua coluna)
+  const larguras = calcularLarguras(ws, headers.length);
+  ws.columns.forEach((col, i) => {
+    col.width = LARGURAS_FIXAS[LETRAS[i]] || larguras[i];
+  });
 
   const buffer = await wb.xlsx.writeBuffer();
   return buffer;

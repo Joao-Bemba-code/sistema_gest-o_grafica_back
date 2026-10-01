@@ -1,6 +1,8 @@
-const { TesourariaMovimento, ContaBancaria, Cliente, Faturacao, Usuario } = require("../models");
+const { TesourariaMovimento, TesourariaAnexo, ContaBancaria, Cliente, Faturacao, Usuario } = require("../models");
 const { Op, fn, col, literal } = require("sequelize");
 const { gerarExcel } = require("../services/tesourariaExcel");
+const path = require("path");
+const fs = require("fs");
 
 const ESTADOS = ["pendente", "confirmado", "cancelado"];
 const TIPOS = ["entrada", "saida", "transferencia"];
@@ -42,6 +44,7 @@ exports.listar = async (req, res) => {
         { model: Cliente, as: "cliente", attributes: ["id", "nome", "empresa"], required: false },
         { model: Faturacao, as: "fatura", attributes: ["id", "numero", "total"], required: false },
         { model: Usuario, as: "usuario", attributes: ["id", "nome"], required: false },
+        { model: TesourariaAnexo, as: "anexos", required: false },
       ],
       order: [["data_movimento", "DESC"], ["createdAt", "DESC"]],
     });
@@ -62,6 +65,7 @@ exports.buscar = async (req, res) => {
         { model: Faturacao, as: "fatura", required: false },
         { model: Usuario, as: "usuario", attributes: ["id", "nome"], required: false },
         { model: Usuario, as: "aprovador", attributes: ["id", "nome"], required: false },
+        { model: TesourariaAnexo, as: "anexos", required: false },
       ],
     });
     if (!movimento) return res.status(404).json({ erro: "Movimento não encontrado" });
@@ -337,6 +341,21 @@ exports.exportar = async (req, res) => {
 
     const capitalizar = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : "");
 
+    // Entrada soma, saída subtrai; transferência não altera o total global.
+    function sinalDe(tipo, valor) {
+      const t = String(tipo || "").toLowerCase();
+      if (t === "entrada") return Number(valor || 0);
+      if (t === "saida") return -Number(valor || 0);
+      return 0;
+    }
+
+    // Saldo actual (todas as contas activas ou apenas a conta filtrada)
+    const saldoAtual = Number((await ContaBancaria.sum("saldo_atual", {
+      where: conta_id
+        ? { id: conta_id, organizacao_id: req.organizacao_id }
+        : { organizacao_id: req.organizacao_id, ativo: true },
+    })) || 0);
+
     // Começamos o saldo acumulado a partir dos saldos actuais e retrocedemos.
     // Para o extracto, simplesmente percorremos os movimentos e acumulamos.
     // Melhor abordagem: usar o saldo da conta antes do período (se pedido).
@@ -353,16 +372,24 @@ exports.exportar = async (req, res) => {
           id: { [Op.notIn]: ids },
         },
       });
-      const saldoAtual = await ContaBancaria.sum("saldo_atual", {
+      const saldoAtualConta = await ContaBancaria.sum("saldo_atual", {
         where: { id: conta_id, organizacao_id: req.organizacao_id },
       });
-      saldoAnterior = Number(saldoAtual || 0) - Number(fora || 0);
+      saldoAnterior = Number(saldoAtualConta || 0) - Number(fora || 0);
+    } else if (!conta_id && movimentos.length) {
+      // Sem filtro de conta: o saldo acumulado começa antes do período para
+      // terminar exactamente no saldo actual do momento.
+      const deltaExportado = movimentos.reduce(
+        (s, m) => (m.estado === "confirmado" ? s + sinalDe(m.tipo, m.valor) : s),
+        0
+      );
+      saldoAnterior = Number((saldoAtual - deltaExportado).toFixed(2));
     }
 
     // Exportação para Excel (.xlsx) com formatação — ?formato=xlsx
     if (String(req.query.formato || "").toLowerCase() === "xlsx") {
       const moeda = String(req.query.moeda || "KZ").toUpperCase();
-      const buffer = await gerarExcel({ movimentos, conta_id, saldoAnterior, moeda });
+      const buffer = await gerarExcel({ movimentos, conta_id, saldoAnterior, saldoAtual, moeda });
       const dataExport = new Date().toISOString().split("T")[0];
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
       res.setHeader("Content-Disposition", `attachment; filename="extrato_tesouraria_${dataExport}.xlsx"`);
@@ -436,6 +463,7 @@ exports.exportar = async (req, res) => {
     linhas.push(`"TOTAL ENTRADAS";"${fmtValor(totalEntradas)}"`);
     linhas.push(`"TOTAL SAÍDAS";"${fmtValor(totalSaidas)}"`);
     linhas.push(`"SALDO DO PERÍODO";"${fmtValor(Number((totalEntradas - totalSaidas).toFixed(2)))}"`);
+    linhas.push(`"SALDO ATUAL";"${fmtValor(saldoAtual)}"`);
     linhas.push(`"EXPORTADO EM";"${new Date().toLocaleString("pt-AO")}"`);
 
     const csv = "\uFEFF" + linhas.join("\r\n");
@@ -447,5 +475,55 @@ exports.exportar = async (req, res) => {
   } catch (e) {
     console.error("Erro ao exportar tesouraria:", e);
     return res.status(500).json({ erro: "Erro ao exportar dados" });
+  }
+};
+
+// Anexa ficheiros (PDF/imagem) a um movimento — recibos de pagamento, comprovativos.
+exports.anexarFicheiros = async (req, res) => {
+  try {
+    const movimento = await TesourariaMovimento.findOne({
+      where: { id: req.params.id, organizacao_id: req.organizacao_id },
+    });
+    if (!movimento) return res.status(404).json({ erro: "Movimento não encontrado" });
+
+    const ficheiros = req.files || [];
+    if (!ficheiros.length) return res.status(400).json({ erro: "Nenhum ficheiro recebido" });
+
+    const anexos = [];
+    for (const f of ficheiros) {
+      anexos.push(await TesourariaAnexo.create({
+        organizacao_id: req.organizacao_id,
+        movimento_id: movimento.id,
+        nome_original: f.originalname || f.filename,
+        caminho: `tesouraria/${f.filename}`,
+        mime: f.mimetype || "",
+        tamanho: f.size || 0,
+      }));
+    }
+    return res.status(201).json(anexos);
+  } catch (e) {
+    console.error("Erro ao anexar ficheiros:", e);
+    return res.status(500).json({ erro: "Erro ao anexar ficheiros" });
+  }
+};
+
+// Remove um anexo (registo e ficheiro em disco)
+exports.removerAnexo = async (req, res) => {
+  try {
+    const anexo = await TesourariaAnexo.findOne({
+      where: { id: req.params.anexoId, organizacao_id: req.organizacao_id },
+    });
+    if (!anexo) return res.status(404).json({ erro: "Anexo não encontrado" });
+
+    const UPLOADS = process.env.SIGRAF_UPLOADS || path.join(__dirname, "..", "uploads");
+    const ficheiro = path.join(UPLOADS, anexo.caminho);
+    fs.unlink(ficheiro, (err) => {
+      if (err && err.code !== "ENOENT") console.error("Erro ao apagar ficheiro de anexo:", err.message);
+    });
+    await anexo.destroy();
+    return res.json({ mensagem: "Anexo removido" });
+  } catch (e) {
+    console.error("Erro ao remover anexo:", e);
+    return res.status(500).json({ erro: "Erro ao remover anexo" });
   }
 };

@@ -30,6 +30,7 @@ const Maquina = require("./Maquina");
 const Notificacao = require("./Notificacao");
 const ContaBancaria = require("./ContaBancaria");
 const TesourariaMovimento = require("./TesourariaMovimento");
+const TesourariaAnexo = require("./TesourariaAnexo");
 const SerieAGT = require("./SerieAGT");
 
 Organizacao.hasMany(Usuario, { foreignKey: "organizacao_id" });
@@ -174,6 +175,9 @@ TesourariaMovimento.belongsTo(Usuario, { foreignKey: "usuario_id", as: "usuario"
 Usuario.hasMany(TesourariaMovimento, { foreignKey: "aprovado_por", as: "aprovacoes" });
 TesourariaMovimento.belongsTo(Usuario, { foreignKey: "aprovado_por", as: "aprovador" });
 
+TesourariaMovimento.hasMany(TesourariaAnexo, { foreignKey: "movimento_id", as: "anexos" });
+TesourariaAnexo.belongsTo(TesourariaMovimento, { foreignKey: "movimento_id" });
+
 module.exports = {
   sequelize,
   Organizacao,
@@ -207,5 +211,6 @@ module.exports = {
   Notificacao,
   ContaBancaria,
   TesourariaMovimento,
+  TesourariaAnexo,
   SerieAGT,
 };

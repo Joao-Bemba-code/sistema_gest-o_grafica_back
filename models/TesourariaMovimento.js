@@ -28,7 +28,7 @@ const TesourariaMovimento = sequelize.define("tesouraria_movimento", {
   fatura_id: { type: DataTypes.INTEGER },
   conta_destino_id: { type: DataTypes.INTEGER },
   metodo_pagamento: {
-    type: DataTypes.ENUM("dinheiro", "transferencia", "deposito", "ordem_saida", "multicaixa", "referencia", "cheque"),
+    type: DataTypes.ENUM("dinheiro", "transferencia", "deposito", "ordem_saida", "multicaixa", "referencia", "cheque", "tpa"),
   },
   comprovativo: { type: DataTypes.STRING(500) },
   estado: {
