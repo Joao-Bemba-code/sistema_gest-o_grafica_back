@@ -1,8 +1,6 @@
 const { TesourariaMovimento, TesourariaAnexo, ContaBancaria, Cliente, Faturacao, Usuario } = require("../models");
 const { Op, fn, col, literal } = require("sequelize");
 const { gerarExcel } = require("../services/tesourariaExcel");
-const path = require("path");
-const fs = require("fs");
 
 const ESTADOS = ["pendente", "confirmado", "cancelado"];
 const TIPOS = ["entrada", "saida", "transferencia"];
@@ -44,7 +42,7 @@ exports.listar = async (req, res) => {
         { model: Cliente, as: "cliente", attributes: ["id", "nome", "empresa"], required: false },
         { model: Faturacao, as: "fatura", attributes: ["id", "numero", "total"], required: false },
         { model: Usuario, as: "usuario", attributes: ["id", "nome"], required: false },
-        { model: TesourariaAnexo, as: "anexos", required: false },
+        { model: TesourariaAnexo, as: "anexos", required: false, attributes: { exclude: ["conteudo"] } },
       ],
       order: [["data_movimento", "DESC"], ["createdAt", "DESC"]],
     });
@@ -65,7 +63,7 @@ exports.buscar = async (req, res) => {
         { model: Faturacao, as: "fatura", required: false },
         { model: Usuario, as: "usuario", attributes: ["id", "nome"], required: false },
         { model: Usuario, as: "aprovador", attributes: ["id", "nome"], required: false },
-        { model: TesourariaAnexo, as: "anexos", required: false },
+        { model: TesourariaAnexo, as: "anexos", required: false, attributes: { exclude: ["conteudo"] } },
       ],
     });
     if (!movimento) return res.status(404).json({ erro: "Movimento não encontrado" });
@@ -479,6 +477,7 @@ exports.exportar = async (req, res) => {
 };
 
 // Anexa ficheiros (PDF/imagem) a um movimento — recibos de pagamento, comprovativos.
+// O conteúdo é guardado na base de dados (BLOB) para sobreviver a redeploys.
 exports.anexarFicheiros = async (req, res) => {
   try {
     const movimento = await TesourariaMovimento.findOne({
@@ -494,10 +493,11 @@ exports.anexarFicheiros = async (req, res) => {
       anexos.push(await TesourariaAnexo.create({
         organizacao_id: req.organizacao_id,
         movimento_id: movimento.id,
-        nome_original: f.originalname || f.filename,
-        caminho: `tesouraria/${f.filename}`,
+        nome_original: f.originalname || f.filename || "anexo",
+        caminho: null,
         mime: f.mimetype || "",
         tamanho: f.size || 0,
+        conteudo: f.buffer || null,
       }));
     }
     return res.status(201).json(anexos);
@@ -507,7 +507,30 @@ exports.anexarFicheiros = async (req, res) => {
   }
 };
 
-// Remove um anexo (registo e ficheiro em disco)
+// Devolve o conteúdo do anexo (PDF/imagem) guardado na base de dados.
+exports.downloadAnexo = async (req, res) => {
+  try {
+    const anexo = await TesourariaAnexo.findOne({
+      where: { id: req.params.anexoId, organizacao_id: req.organizacao_id },
+    });
+    if (!anexo) return res.status(404).json({ erro: "Anexo não encontrado" });
+    if (!anexo.conteudo || !anexo.conteudo.length) {
+      return res.status(410).json({ erro: "Ficheiro indisponível (não existe cópia guardada)" });
+    }
+
+    res.setHeader("Content-Type", anexo.mime || "application/octet-stream");
+    res.setHeader("Content-Length", anexo.conteudo.length);
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    const nomeSeguro = String(anexo.nome_original || "anexo").replace(/[^\w.\- ]+/g, "_");
+    res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(nomeSeguro)}`);
+    return res.end(anexo.conteudo);
+  } catch (e) {
+    console.error("Erro ao devolver anexo:", e);
+    return res.status(500).json({ erro: "Erro ao devolver anexo" });
+  }
+};
+
+// Remove um anexo (o conteúdo está na base de dados)
 exports.removerAnexo = async (req, res) => {
   try {
     const anexo = await TesourariaAnexo.findOne({
@@ -515,11 +538,6 @@ exports.removerAnexo = async (req, res) => {
     });
     if (!anexo) return res.status(404).json({ erro: "Anexo não encontrado" });
 
-    const UPLOADS = process.env.SIGRAF_UPLOADS || path.join(__dirname, "..", "uploads");
-    const ficheiro = path.join(UPLOADS, anexo.caminho);
-    fs.unlink(ficheiro, (err) => {
-      if (err && err.code !== "ENOENT") console.error("Erro ao apagar ficheiro de anexo:", err.message);
-    });
     await anexo.destroy();
     return res.json({ mensagem: "Anexo removido" });
   } catch (e) {

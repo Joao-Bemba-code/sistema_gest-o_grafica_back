@@ -8,6 +8,8 @@ router.use(auth);
 
 router.get("/exportar", requirePermissao("tesouraria", "ver"), Controller.exportar);
 router.get("/resumo", requirePermissao("tesouraria", "ver"), Controller.resumo);
+// Download de anexo ANTES do GET /:id para "anexos" não ser capturado como id
+router.get("/anexos/:anexoId", requirePermissao("tesouraria", "ver"), Controller.downloadAnexo);
 router.get("/", requirePermissao("tesouraria", "ver"), Controller.listar);
 router.get("/:id", requirePermissao("tesouraria", "ver"), Controller.buscar);
 router.post("/", requirePermissao("tesouraria", "criar"), Controller.criar);
