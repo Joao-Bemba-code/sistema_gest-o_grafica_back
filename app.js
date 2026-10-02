@@ -57,6 +57,7 @@ function criarApp(opcoes = {}) {
     app.use("/api/notificacoes", require("./routers/notificacoes"));
     app.use("/api/contas-bancarias", require("./routers/contasBancarias"));
     app.use("/api/tesouraria", require("./routers/tesouraria"));
+    app.use("/api/dividas", require("./routers/dividas"));
     app.use("/api/sinc", require("./routers/sincronizacao"));
     app.get("/api/health", (req, res) => res.json({ ok: true, hora: new Date().toISOString() }));
   }

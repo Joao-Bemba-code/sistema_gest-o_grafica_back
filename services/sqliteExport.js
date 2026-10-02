@@ -16,6 +16,7 @@ const ORDEM = [
   "Orcamento", "OrcamentoItem", "OrcamentoMaterial", "OrcamentoServico", "OrdemProducao",
   "PreImpressao", "Impressao", "Acabamento", "Qualidade", "ReservaEstoque",
   "Faturacao", "Pedido", "PedidoItem",
+  "ContaBancaria", "TesourariaMovimento", "TesourariaAnexo", "Divida",
 ];
 
 function carimbo(d = new Date()) {

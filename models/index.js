@@ -31,6 +31,7 @@ const Notificacao = require("./Notificacao");
 const ContaBancaria = require("./ContaBancaria");
 const TesourariaMovimento = require("./TesourariaMovimento");
 const TesourariaAnexo = require("./TesourariaAnexo");
+const Divida = require("./Divida");
 const SerieAGT = require("./SerieAGT");
 
 Organizacao.hasMany(Usuario, { foreignKey: "organizacao_id" });
@@ -178,6 +179,17 @@ TesourariaMovimento.belongsTo(Usuario, { foreignKey: "aprovado_por", as: "aprova
 TesourariaMovimento.hasMany(TesourariaAnexo, { foreignKey: "movimento_id", as: "anexos" });
 TesourariaAnexo.belongsTo(TesourariaMovimento, { foreignKey: "movimento_id" });
 
+Organizacao.hasMany(Divida, { foreignKey: "organizacao_id" });
+Divida.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
+Cliente.hasMany(Divida, { foreignKey: "cliente_id", as: "dividas" });
+Divida.belongsTo(Cliente, { foreignKey: "cliente_id", as: "cliente" });
+Faturacao.hasMany(Divida, { foreignKey: "fatura_id", as: "dividas" });
+Divida.belongsTo(Faturacao, { foreignKey: "fatura_id", as: "fatura" });
+ContaBancaria.hasMany(Divida, { foreignKey: "conta_bancaria_id", as: "dividas" });
+Divida.belongsTo(ContaBancaria, { foreignKey: "conta_bancaria_id", as: "conta" });
+Usuario.hasMany(Divida, { foreignKey: "usuario_id", as: "dividas_criadas" });
+Divida.belongsTo(Usuario, { foreignKey: "usuario_id", as: "usuario" });
+
 module.exports = {
   sequelize,
   Organizacao,
@@ -212,5 +224,6 @@ module.exports = {
   ContaBancaria,
   TesourariaMovimento,
   TesourariaAnexo,
+  Divida,
   SerieAGT,
 };
