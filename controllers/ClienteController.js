@@ -38,14 +38,37 @@ exports.listar = async (req, res) => {
     const where = { organizacao_id: req.organizacao_id };
     if (tipo) where.tipo = tipo;
     if (busca) {
-      where[require("sequelize").Op.or] = [
-        { nome: { [require("sequelize").Op.like]: `%${busca}%` } },
-        { empresa: { [require("sequelize").Op.like]: `%${busca}%` } },
-        { nif: { [require("sequelize").Op.like]: `%${busca}%` } },
+      const { Op } = require("sequelize");
+      where[Op.or] = [
+        { nome: { [Op.like]: `%${busca}%` } },
+        { empresa: { [Op.like]: `%${busca}%` } },
+        { nif: { [Op.like]: `%${busca}%` } },
       ];
     }
-    const clientes = await Cliente.findAll({ where, order: [["nome", "ASC"]] });
-    return res.json(clientes.map(serializar));
+    const clientes = await Cliente.findAll({ where, order: [["nome", "ASC"], ["id", "ASC"]] });
+    const serializados = clientes.map(serializar);
+    const vistos = new Set();
+    const unicos = [];
+    for (const c of serializados) {
+      if (c.deleted === 1 || c.deletedAt) continue;
+      const nifLimpo = (c.nif || "").replace(/\D/g, "").toLowerCase();
+      const emp = (c.empresa || "").trim().toLowerCase();
+      const nom = (c.nome || "").trim().toLowerCase();
+      let chave;
+      if (nifLimpo) {
+        chave = `nif:${nifLimpo}`;
+      } else if (emp && nom) {
+        chave = `en:${emp}|${nom}`;
+      } else if (emp) {
+        chave = `e:${emp}`;
+      } else {
+        chave = `n:${nom}`;
+      }
+      if (vistos.has(chave)) continue;
+      vistos.add(chave);
+      unicos.push(c);
+    }
+    return res.json(unicos);
   } catch (e) {
     return res.status(500).json({ erro: "Erro ao listar clientes" });
   }
