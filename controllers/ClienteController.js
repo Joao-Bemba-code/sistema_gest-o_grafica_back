@@ -51,19 +51,12 @@ exports.listar = async (req, res) => {
     const unicos = [];
     for (const c of serializados) {
       if (c.deleted === 1 || c.deletedAt) continue;
-      const nifLimpo = (c.nif || "").replace(/\D/g, "").toLowerCase();
       const emp = (c.empresa || "").trim().toLowerCase();
       const nom = (c.nome || "").trim().toLowerCase();
-      let chave;
-      if (nifLimpo) {
-        chave = `nif:${nifLimpo}`;
-      } else if (emp && nom) {
-        chave = `en:${emp}|${nom}`;
-      } else if (emp) {
-        chave = `e:${emp}`;
-      } else {
-        chave = `n:${nom}`;
-      }
+      // A chave é o NOME do cliente (não o NIF nem a empresa): registos com o
+      // mesmo nome são o mesmo cliente repetido, e clientes diferentes que
+      // partilham o mesmo NIF/empresa não podem ser escondidos da lista.
+      const chave = nom ? `n:${nom}` : emp ? `e:${emp}` : `id:${c.id}`;
       if (vistos.has(chave)) continue;
       vistos.add(chave);
       unicos.push(c);

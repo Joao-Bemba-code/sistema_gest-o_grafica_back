@@ -395,10 +395,13 @@ exports.resumo = async (req, res) => {
 
       total += s;
       if (d.cliente) {
-        const chave = d.cliente.id;
+        // Agrupar pelo NOME do cliente (e não pelo id): o mesmo cliente
+        // registado duas vezes não pode aparecer duas vezes no ranking.
+        const nomeCliente = (d.cliente.nome || "").trim() || (d.cliente.empresa || "").trim() || "Sem cliente";
+        const chave = `n:${nomeCliente.toLowerCase()}`;
         const actual = porCliente.get(chave) || {
-          cliente_id: chave,
-          nome: d.cliente.empresa || d.cliente.nome || "Sem cliente",
+          cliente_id: d.cliente.id,
+          nome: d.cliente.nome || d.cliente.empresa || "Sem cliente",
           saldo: 0,
           vencida: 0,
           qtd: 0,
