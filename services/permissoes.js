@@ -84,9 +84,20 @@ const PERFIS = {
 function permissoesDoUsuario(usuario) {
   if (!usuario) return {};
   if (usuario.perfil === "admin") return perfilAdmin();
-  if (usuario.permissoes) return usuario.permissoes;
-  const perfil = PERFIS[usuario.perfil] || PERFIS.producao;
-  return perfil.permissoes;
+  const perfil = (PERFIS[usuario.perfil] || PERFIS.producao).permissoes;
+  if (!usuario.permissoes) return perfil;
+  // Normaliza as permissões personalizadas: preenche módulos/ações em falta
+  // (dados antigos ou gravados incompletos) com os valores do perfil, para que
+  // uma permissão parcial não bloqueie silenciosamente outros módulos.
+  const efetivas = {};
+  MODULOS.forEach((m) => {
+    efetivas[m] = {};
+    ACOES.forEach((a) => {
+      const valor = usuario.permissoes[m] && usuario.permissoes[m][a];
+      efetivas[m][a] = typeof valor === "boolean" ? valor : !!(perfil[m] && perfil[m][a]);
+    });
+  });
+  return efetivas;
 }
 
 // Verifica se o utilizador tem uma ação num módulo.
