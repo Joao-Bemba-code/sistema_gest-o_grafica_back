@@ -8,6 +8,7 @@ const Acabamento = sequelize.define("acabamento", {
   servico: { type: DataTypes.STRING(100) },
   estado: { type: DataTypes.ENUM("pendente", "em_execucao", "concluido"), defaultValue: "pendente" },
   maquina: { type: DataTypes.STRING(100) },
+  operador: { type: DataTypes.STRING(100) },
   tempo_estimado: { type: DataTypes.STRING(20) },
   erros: { type: DataTypes.INTEGER, defaultValue: 0 },
   perdas: { type: DataTypes.INTEGER, defaultValue: 0 },

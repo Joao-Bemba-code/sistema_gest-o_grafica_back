@@ -690,6 +690,57 @@ exports.salvarImpressao = async (req, res) => {
         erro: "Os materiais desta OP ainda não foram libertados pelo estoque. Faça a saída dos materiais antes de registar a impressão.",
       });
     }
+    const opId = Number(ordem_producao_id);
+
+    // Registo multi-máquina: cada entrada é uma máquina com o seu colaborador
+    // e o seu tempo de trabalho. Substitui o plano anterior da OP.
+    if (Array.isArray(req.body.registos)) {
+      const registos = req.body.registos
+        .filter((r) => r && String(r.maquina || "").trim())
+        .map((r) => {
+          const produzida = parseInt(r.quantidadeProduzida ?? r.quantidade_produzida, 10) || 0;
+          const rejeitada = parseInt(r.quantidadeRejeitada ?? r.quantidade_rejeitada, 10) || 0;
+          const total = produzida + rejeitada;
+          return {
+            organizacao_id: req.organizacao_id,
+            ordem_producao_id: opId,
+            maquina: String(r.maquina || "").trim(),
+            operador: String(r.operador || "").trim(),
+            data_inicio: String(r.horaInicio || r.data_inicio || "").trim() || null,
+            data_fim: String(r.horaFim || r.data_fim || "").trim() || null,
+            tempo_estimado: String(r.tempoEstimado || r.tempo_estimado || "").trim() || null,
+            quantidade_produzida: produzida,
+            quantidade_rejeitada: rejeitada,
+            taxa_rejeicao: total > 0 ? Number(((rejeitada / total) * 100).toFixed(2)) : 0,
+            observacoes: r.observacoes || null,
+            usuario_id: req.usuario.id,
+          };
+        });
+      if (!registos.length) {
+        return res.status(422).json({ erro: "Selecione pelo menos uma máquina para a impressão" });
+      }
+      await Impressao.update(
+        { deleted: 1, deletedAt: new Date() },
+        { where: { ordem_producao_id: opId, organizacao_id: req.organizacao_id } }
+      );
+      const criados = await Impressao.bulkCreate(registos);
+      await OrdemProducao.update({ impressao_ok: true }, { where: { id: opId } });
+      for (const imp of criados) {
+        await registarProcesso(opId, "impressao", {
+          maquina: imp.maquina || null,
+          operador: imp.operador || null,
+          data_inicio: imp.data_inicio || null,
+          data_fim: imp.data_fim || null,
+          tempo_estimado: imp.tempo_estimado || null,
+          quantidade_produzida: imp.quantidade_produzida ?? 0,
+          quantidade_rejeitada: imp.quantidade_rejeitada ?? 0,
+          taxa_rejeicao: imp.taxa_rejeicao ?? 0,
+          observacoes: imp.observacoes || null,
+        });
+      }
+      return res.json(criados);
+    }
+
     const dados = {};
     Object.entries(MAPA_IMP).forEach(([chave, campo]) => {
       const v = req.body[chave];
@@ -734,8 +785,22 @@ exports.salvarAcabamento = async (req, res) => {
   try {
     const { ordem_producao_id } = req.params;
     const body = req.body || {};
+    // Várias máquinas por OP: cada uma com o seu colaborador e tempo de
+    // trabalho. Sem `maquinas`, mantém-se o caminho antigo (body.maquina).
+    const maquinas = Array.isArray(body.maquinas)
+      ? body.maquinas
+          .filter((m) => m && String(m.maquina || "").trim())
+          .map((m) => ({
+            maquina: String(m.maquina || "").trim(),
+            operador: String(m.operador || "").trim() || null,
+            tempo_estimado: String(m.tempoEstimado || m.tempo_estimado || "").trim() || null,
+            erros: m.erros != null ? Number(m.erros) || 0 : null,
+            perdas: m.perdas != null ? Number(m.perdas) || 0 : null,
+          }))
+      : [];
     const meta = {
       maquina: body.maquina || null,
+      operador: body.operador || null,
       tempo_estimado: body.tempoEstimado || body.tempo_estimado || null,
       erros: body.erros != null ? Number(body.erros) || 0 : null,
       perdas: body.perdas != null ? Number(body.perdas) || 0 : null,
@@ -746,7 +811,7 @@ exports.salvarAcabamento = async (req, res) => {
       servicos = body.servicos;
     } else if (body && typeof body === "object") {
       servicos = Object.entries(body)
-        .filter(([k]) => k !== "entrega" && k !== "responsavel" && k !== "observacoes" && k !== "maquina" && k !== "tempoEstimado" && k !== "tempo_estimado" && k !== "erros" && k !== "perdas")
+        .filter(([k]) => k !== "entrega" && k !== "responsavel" && k !== "observacoes" && k !== "maquina" && k !== "operador" && k !== "tempoEstimado" && k !== "tempo_estimado" && k !== "erros" && k !== "perdas" && k !== "maquinas")
         .map(([servico, estado]) => ({ servico, estado: estado || "pendente" }));
     }
     if (servicos && servicos.length) {
@@ -759,29 +824,45 @@ exports.salvarAcabamento = async (req, res) => {
         });
       }
       await Acabamento.update({ deleted: 1, deletedAt: new Date() }, { where: { ordem_producao_id, organizacao_id: req.organizacao_id } });
-      const items = servicos.map((s) => ({
-        organizacao_id: req.organizacao_id,
-        ordem_producao_id: parseInt(ordem_producao_id, 10),
-        servico: s.servico,
-        estado: s.estado || "pendente",
-        maquina: meta.maquina,
-        tempo_estimado: meta.tempo_estimado,
-        erros: meta.erros,
-        perdas: meta.perdas,
-        observacoes: meta.observacoes,
-      }));
+      // Sem máquinas indicadas, grava-se com metadados vazios (máquina é
+      // opcional no acabamento) — o estado de cada serviço continua válido.
+      const alvos = maquinas.length
+        ? maquinas
+        : [{ maquina: meta.maquina, operador: meta.operador, tempo_estimado: meta.tempo_estimado, erros: meta.erros, perdas: meta.perdas }];
+      const items = [];
+      for (const s of servicos) {
+        for (const m of alvos) {
+          items.push({
+            organizacao_id: req.organizacao_id,
+            ordem_producao_id: parseInt(ordem_producao_id, 10),
+            servico: s.servico,
+            estado: s.estado || "pendente",
+            maquina: m.maquina || null,
+            operador: m.operador || null,
+            tempo_estimado: m.tempo_estimado || null,
+            erros: m.erros != null ? m.erros : null,
+            perdas: m.perdas != null ? m.perdas : null,
+            observacoes: body.observacoes || meta.observacoes || null,
+            usuario_id: req.usuario.id,
+          });
+        }
+      }
       const criados = await Acabamento.bulkCreate(items);
       // Aqui vale o que ficou gravado, não o que foi pedido.
       const todosConcluidos = criados.length > 0 && criados.every((c) => c.estado === "concluido");
       await OrdemProducao.update({ acabamento_ok: todosConcluidos }, { where: { id: ordem_producao_id } });
-      await registarProcesso(ordem_producao_id, "acabamento", {
-        maquina: meta.maquina,
-        tempo_estimado: meta.tempo_estimado,
-        erros: meta.erros,
-        perdas: meta.perdas,
-        observacoes: meta.observacoes,
-        servicos: Object.fromEntries(items.map((s) => [s.servico, s.estado])),
-      });
+      const servicosEstado = Object.fromEntries(servicos.map((s) => [s.servico, s.estado || "pendente"]));
+      for (const m of alvos) {
+        await registarProcesso(ordem_producao_id, "acabamento", {
+          maquina: m.maquina || null,
+          operador: m.operador || null,
+          tempo_estimado: m.tempo_estimado || null,
+          erros: m.erros,
+          perdas: m.perdas,
+          observacoes: body.observacoes || meta.observacoes || null,
+          servicos: servicosEstado,
+        });
+      }
       return res.json(criados);
     }
     return res.json([]);
