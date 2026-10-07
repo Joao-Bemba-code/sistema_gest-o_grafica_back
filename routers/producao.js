@@ -5,7 +5,9 @@ const requirePermissao = require("../protect/perm");
 
 router.use(auth);
 
-router.get("/ordens", requirePermissao("producao", "ver"), ProducaoController.listarOrdens);
+// A página de Relatórios usa as ordens sem exigir acesso ao módulo de
+// Produção: quem pode ver relatórios pode ler esta lista.
+router.get("/ordens", requirePermissao.requireQualquerPermissao([["producao", "ver"], ["relatorios", "ver"]]), ProducaoController.listarOrdens);
 router.get("/ordens/:id", requirePermissao("producao", "ver"), ProducaoController.buscarOrdem);
 router.post("/ordens", requirePermissao("producao", "criar"), ProducaoController.criarOrdem);
 router.put("/ordens/:id", requirePermissao("producao", "editar"), ProducaoController.atualizarOrdem);

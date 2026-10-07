@@ -5,7 +5,9 @@ const requirePermissao = require("../protect/perm");
 
 router.use(auth);
 
-router.get("/", requirePermissao("categorias", "ver"), CategoriaController.listar);
+// A página de Relatórios usa as categorias sem exigir acesso ao módulo
+// de Recursos: quem pode ver relatórios pode ler esta lista.
+router.get("/", requirePermissao.requireQualquerPermissao([["categorias", "ver"], ["relatorios", "ver"]]), CategoriaController.listar);
 router.post("/", requirePermissao("categorias", "criar"), CategoriaController.criar);
 router.put("/:id", requirePermissao("categorias", "editar"), CategoriaController.atualizar);
 router.delete("/:id", requirePermissao("categorias", "eliminar"), CategoriaController.remover);

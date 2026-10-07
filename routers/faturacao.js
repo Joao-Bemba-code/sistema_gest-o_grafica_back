@@ -12,7 +12,9 @@ router.post("/agt/consultar/:id", requirePermissao("faturacao", "ver"), Faturaca
 router.post("/agt/enviar/:id", requirePermissao("faturacao", "criar"), FaturacaoController.enviarAGT);
 
 router.get("/exportar", requirePermissao("faturacao", "ver"), FaturacaoController.exportar);
-router.get("/", requirePermissao("faturacao", "ver"), FaturacaoController.listar);
+// A página de Relatórios agrega faturas sem exigir acesso ao módulo de
+// Faturação: quem pode ver relatórios pode ler esta lista.
+router.get("/", requirePermissao.requireQualquerPermissao([["faturacao", "ver"], ["relatorios", "ver"]]), FaturacaoController.listar);
 router.get("/:id", requirePermissao("faturacao", "ver"), FaturacaoController.buscar);
 router.post("/orcamento/:id", requirePermissao("faturacao", "criar"), FaturacaoController.fromOrcamento);
 router.post("/", requirePermissao("faturacao", "criar"), FaturacaoController.criar);
