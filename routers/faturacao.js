@@ -20,6 +20,6 @@ router.post("/orcamento/:id", requirePermissao("faturacao", "criar"), FaturacaoC
 router.post("/", requirePermissao("faturacao", "criar"), FaturacaoController.criar);
 router.put("/:id/pagar", requirePermissao("faturacao", "editar"), FaturacaoController.marcarPaga);
 router.put("/:id", requirePermissao("faturacao", "editar"), FaturacaoController.atualizar);
-router.delete("/:id", requirePermissao("faturacao", "eliminar"), FaturacaoController.remover);
+router.post("/:id/anular", requirePermissao("faturacao", "editar"), FaturacaoController.anular);
 
 module.exports = router;

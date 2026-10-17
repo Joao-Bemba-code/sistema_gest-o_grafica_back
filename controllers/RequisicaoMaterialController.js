@@ -46,6 +46,7 @@ function serializar(r) {
     unidade: i.unidade,
     quantidade: Number(i.quantidade) || 0,
     quantidade_atendida: Number(i.quantidade_atendida) || 0,
+    quantidade_devolvida: Number(i.quantidade_devolvida) || 0,
     observacoes: i.observacoes || "",
   }));
   return {
@@ -428,5 +429,122 @@ exports.cancelar = async (req, res) => {
   } catch (e) {
     console.error("Erro ao cancelar requisição de material:", e);
     return res.status(500).json({ erro: "Erro ao cancelar requisição de material" });
+  }
+};
+
+// Devolve material ao stock. Só é possível devolver o que já saiu (quantidade
+// atendida) e nunca mais do que isso — o acumulado devolvido fica sempre
+// dentro do recebido. Cada devolução gera um movimento de entrada auditável.
+exports.devolver = async (req, res) => {
+  const t = await sequelize.transaction();
+  try {
+    const requisicao = await RequisicaoMaterial.findOne({
+      where: { id: req.params.id, organizacao_id: req.organizacao_id },
+      include: [{ model: RequisicaoMaterialItem, as: "itens", required: false }],
+      transaction: t,
+    });
+    if (!requisicao) {
+      await t.rollback();
+      return res.status(404).json({ erro: "Requisição não encontrada" });
+    }
+    if (!["aprovada", "consumida"].includes(requisicao.estado)) {
+      await t.rollback();
+      return res.status(422).json({ erro: "Só é possível devolver material de requisições aprovadas ou concluídas" });
+    }
+    const itens = requisicao.itens || [];
+    if (!itens.length) {
+      await t.rollback();
+      return res.status(422).json({ erro: "A requisição não tem itens" });
+    }
+    const porId = new Map(itens.map((i) => [Number(i.id), i]));
+
+    const brutos = (Array.isArray(req.body?.itens) ? req.body.itens : [])
+      .map((i) => ({ item: porId.get(Number(i.item_id)), quantidade: parseNum(i.quantidade) }))
+      .filter((x) => x.item && x.quantidade > 0);
+    if (!brutos.length) {
+      await t.rollback();
+      return res.status(422).json({ erro: "Indique a quantidade a devolver de pelo menos um material" });
+    }
+
+    // Nunca devolver mais do que o recebido nesta requisição.
+    const excedidos = [];
+    for (const { item, quantidade } of brutos) {
+      const atendida = Number(item.quantidade_atendida) || 0;
+      const devolvida = Number(item.quantidade_devolvida) || 0;
+      if (quantidade > Number((atendida - devolvida).toFixed(2)) + 1e-9) {
+        excedidos.push(
+          `${item.material_nome} (recebido ${atendida}, já devolvido ${devolvida}, devolver ${quantidade})`
+        );
+      }
+    }
+    if (excedidos.length) {
+      await t.rollback();
+      return res.status(422).json({
+        erro: `A devolução não pode ser superior ao recebido: ${excedidos.join("; ")}.`,
+      });
+    }
+
+    const devolvidoPor = req.body?.devolvido_por || req.usuario?.nome || null;
+    const motivo = String(req.body?.motivo || "").trim();
+    for (const { item, quantidade } of brutos) {
+      const material = await Material.findOne({
+        where: { id: item.material_id, organizacao_id: req.organizacao_id },
+        transaction: t,
+        lock: t.LOCK.UPDATE,
+      });
+      if (!material) {
+        await t.rollback();
+        return res.status(422).json({ erro: `Material "${item.material_nome}" não existe mais` });
+      }
+      await material.update(
+        { quantidade: Number((parseFloat(material.quantidade) + quantidade).toFixed(2)) },
+        { transaction: t }
+      );
+      await MovimentoEstoque.create(
+        {
+          organizacao_id: req.organizacao_id,
+          material_id: item.material_id,
+          tipo: "entrada",
+          quantidade,
+          referencia_tipo: "devolucao",
+          referencia_id: requisicao.id,
+          motivo: motivo || `Devolução de material ${requisicao.numero}`,
+          cliente_nome: requisicao.cliente_nome,
+          solicitado_por: requisicao.solicitado_por,
+          permitido_por: devolvidoPor,
+          usuario_id: req.usuario?.id || null,
+        },
+        { transaction: t }
+      );
+      const jaDevolvida = Number(item.quantidade_devolvida) || 0;
+      await item.update(
+        { quantidade_devolvida: Number((jaDevolvida + quantidade).toFixed(2)) },
+        { transaction: t }
+      );
+    }
+    await t.commit();
+
+    try {
+      await notificacoesService.criar({
+        organizacaoId: req.organizacao_id,
+        tipo: "estoque",
+        nivel: "info",
+        icone: "undo",
+        titulo: `Devolução na requisição ${requisicao.numero}`,
+        descricao: `Material devolvido ao stock por ${devolvidoPor || "Produção"}.`,
+        link: "/estoque",
+        usuarioId: req.usuario?.id || null,
+      });
+    } catch (e) {
+      console.error("Erro ao notificar devolução de material:", e);
+    }
+
+    const completa = await RequisicaoMaterial.findByPk(requisicao.id, { include: INCLUDE })
+      .catch(() => requisicao);
+    return res.json(serializar(completa));
+  } catch (e) {
+    if (!t.finished) await t.rollback().catch(() => {});
+    console.error("Erro ao devolver material da requisição:", e);
+    return res.status(500).json({ erro: "Erro ao devolver material da requisição" });
   }
 };

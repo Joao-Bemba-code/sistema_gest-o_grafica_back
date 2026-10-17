@@ -32,12 +32,18 @@ const TesourariaMovimento = sequelize.define("tesouraria_movimento", {
   },
   comprovativo: { type: DataTypes.STRING(500) },
   estado: {
-    type: DataTypes.ENUM("pendente", "confirmado", "cancelado"),
+    type: DataTypes.ENUM("pendente", "confirmado", "cancelado", "anulado"),
     defaultValue: "confirmado",
   },
+  anulado_por: { type: DataTypes.STRING(200) },
+  data_anulacao: { type: DataTypes.DATE, allowNull: true },
+  motivo_anulacao: { type: DataTypes.TEXT },
   aprovado_por: { type: DataTypes.INTEGER },
   observacoes: { type: DataTypes.TEXT },
   usuario_id: { type: DataTypes.INTEGER, allowNull: false },
+  // Conciliação bancária: marca se o movimento já foi conferido com o extrato.
+  conciliado: { type: DataTypes.BOOLEAN, defaultValue: false },
+  conciliado_em: { type: DataTypes.DATE, allowNull: true },
   deleted: { type: DataTypes.BOOLEAN, defaultValue: false },
   deletedAt: { type: DataTypes.DATE, allowNull: true },
 }, {

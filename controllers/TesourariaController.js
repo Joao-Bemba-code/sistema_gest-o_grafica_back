@@ -2,7 +2,7 @@ const { TesourariaMovimento, TesourariaAnexo, ContaBancaria, Cliente, Faturacao,
 const { Op, fn, col, literal } = require("sequelize");
 const { gerarExcel } = require("../services/tesourariaExcel");
 
-const ESTADOS = ["pendente", "confirmado", "cancelado"];
+const ESTADOS = ["pendente", "confirmado", "cancelado", "anulado"];
 const TIPOS = ["entrada", "saida", "transferencia"];
 
 function normalizarCategoria(tipo, valor) {
@@ -39,6 +39,7 @@ exports.listar = async (req, res) => {
       where,
       include: [
         { model: ContaBancaria, as: "conta", attributes: ["id", "banco_nome", "numero_conta", "tipo_conta"], required: false },
+        { model: ContaBancaria, as: "contaDestino", attributes: ["id", "banco_nome", "numero_conta", "tipo_conta"], required: false },
         { model: Cliente, as: "cliente", attributes: ["id", "nome", "empresa"], required: false },
         { model: Faturacao, as: "fatura", attributes: ["id", "numero", "total"], required: false },
         { model: Usuario, as: "usuario", attributes: ["id", "nome"], required: false },
@@ -174,13 +175,19 @@ exports.atualizar = async (req, res) => {
   }
 };
 
-exports.remover = async (req, res) => {
+// Anulação (estorno): o movimento confirmado é revertido no saldo das contas,
+// mas o registo permanece na base de dados com estado "anulado" — nunca é apagado.
+exports.anular = async (req, res) => {
   try {
     const movimento = await TesourariaMovimento.findOne({
       where: { id: req.params.id, organizacao_id: req.organizacao_id },
     });
     if (!movimento) return res.status(404).json({ erro: "Movimento não encontrado" });
-    if (movimento.estado === "confirmado") {
+    if (movimento.estado === "anulado") {
+      return res.status(422).json({ erro: "Movimento já anulado" });
+    }
+    const eraConfirmado = movimento.estado === "confirmado";
+    if (eraConfirmado) {
       // Repor o saldo da conta de origem.
       if (movimento.conta_bancaria_id) {
         const conta = await ContaBancaria.findByPk(movimento.conta_bancaria_id);
@@ -200,11 +207,16 @@ exports.remover = async (req, res) => {
         }
       }
     }
-    await movimento.update({ deleted: 1, deletedAt: new Date() });
-    return res.json({ mensagem: "Movimento removido com sucesso" });
+    await movimento.update({
+      estado: "anulado",
+      anulado_por: req.usuario?.nome || null,
+      data_anulacao: new Date(),
+      motivo_anulacao: req.body?.motivo ? String(req.body.motivo).trim() : null,
+    });
+    return res.json({ mensagem: "Movimento anulado com sucesso", movimento: movimento.id });
   } catch (e) {
-    console.error("Erro ao remover movimento:", e);
-    return res.status(500).json({ erro: "Erro ao remover movimento" });
+    console.error("Erro ao anular movimento:", e);
+    return res.status(500).json({ erro: "Erro ao anular movimento" });
   }
 };
 
@@ -267,6 +279,33 @@ exports.resumo = async (req, res) => {
   } catch (e) {
     console.error("Erro ao gerar resumo de tesouraria:", e);
     return res.status(500).json({ erro: "Erro ao gerar resumo de tesouraria" });
+  }
+};
+
+// Conciliação bancária: marca ou desmarca movimentos como conciliados.
+// Usado pela aba Conciliação da tesouraria para conferir com o extrato do banco.
+exports.conciliar = async (req, res) => {
+  try {
+    const { ids, conciliado = true } = req.body || {};
+    if (!Array.isArray(ids) || !ids.length) {
+      return res.status(400).json({ erro: "Indique os movimentos a conciliar" });
+    }
+    const agora = new Date();
+    await TesourariaMovimento.update(
+      { conciliado: !!conciliado, conciliado_em: conciliado ? agora : null },
+      { where: { id: { [Op.in]: ids }, organizacao_id: req.organizacao_id } }
+    );
+    const total = await TesourariaMovimento.count({ where: { id: { [Op.in]: ids } } });
+    return res.json({
+      mensagem: conciliado
+        ? `${total} movimento(s) conciliado(s) com sucesso`
+        : `${total} movimento(s) desmarcado(s) da conciliação`,
+      conciliado: !!conciliado,
+      total,
+    });
+  } catch (e) {
+    console.error("Erro ao conciliar movimentos:", e);
+    return res.status(500).json({ erro: "Erro ao conciliar movimentos" });
   }
 };
 

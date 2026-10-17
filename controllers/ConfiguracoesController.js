@@ -36,12 +36,20 @@ exports.buscarSistema = async (req, res) => {
 
 exports.guardarSistema = async (req, res) => {
   try {
-    const { idioma, formato_data, moeda, fuso_horario, dias_aviso_ferias, limite_ficheiros } = req.body;
+    const {
+      idioma, formato_data, moeda, fuso_horario, dias_aviso_ferias, limite_ficheiros,
+      compras_exige_aprovacao, compras_alcada_valor, compras_alcada_valor_superior,
+    } = req.body;
     let sistema = await Sistema.findOne({ where: { organizacao_id: req.organizacao_id } });
     if (!sistema) {
       sistema = await Sistema.create({ organizacao_id: req.organizacao_id });
     }
-    await sistema.update({ idioma, formato_data, moeda, fuso_horario, dias_aviso_ferias, limite_ficheiros });
+    await sistema.update({
+      idioma, formato_data, moeda, fuso_horario, dias_aviso_ferias, limite_ficheiros,
+      compras_exige_aprovacao: compras_exige_aprovacao !== undefined ? !!compras_exige_aprovacao : sistema.compras_exige_aprovacao,
+      compras_alcada_valor: compras_alcada_valor !== undefined ? Number(compras_alcada_valor) || 0 : sistema.compras_alcada_valor,
+      compras_alcada_valor_superior: compras_alcada_valor_superior !== undefined ? Number(compras_alcada_valor_superior) || 0 : sistema.compras_alcada_valor_superior,
+    });
     return res.json(sistema);
   } catch (e) {
     return res.status(500).json({ erro: "Erro ao guardar parâmetros do sistema" });

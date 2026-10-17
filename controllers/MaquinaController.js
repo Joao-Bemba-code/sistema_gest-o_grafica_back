@@ -3,6 +3,15 @@ const { Op } = require("sequelize");
 
 const normalizarNome = (v) => String(v || "").trim().toLowerCase();
 
+// MySQL em modo estrito rejeita '' em colunas INTEGER/DATEONLY — o formulário envia vazios
+const CAMPOS_VAZIOS_NULOS = ["ano_fabrico", "ultima_manutencao", "proxima_manutencao"];
+const limparVazios = (dados) => {
+  for (const k of CAMPOS_VAZIOS_NULOS) {
+    if (dados[k] === "") dados[k] = null;
+  }
+  return dados;
+};
+
 function maquinaDeMaterial(material) {
   const esp = material.especificacoes && typeof material.especificacoes === "object" ? material.especificacoes : {};
   const cat = material.categoria || {};
@@ -127,7 +136,7 @@ exports.buscarPorId = async (req, res) => {
 
 exports.criar = async (req, res) => {
   try {
-    const dados = { ...req.body, organizacao_id: req.organizacao_id };
+    const dados = limparVazios({ ...req.body, organizacao_id: req.organizacao_id });
     const entradas = [
       { estado: dados.estado || "operacional", data: new Date().toISOString(), motivo: dados.motivo_estado || "Registo inicial" },
     ];
@@ -143,7 +152,7 @@ exports.atualizar = async (req, res) => {
   try {
     const maquina = await resolverMaquina(req.params.id, req.organizacao_id);
     if (!maquina) return res.status(404).json({ erro: "Maquina nao encontrada" });
-    const dados = { ...req.body };
+    const dados = limparVazios({ ...req.body });
     const novoEstado = dados.estado;
     const motivoEstado = dados.motivo_estado || "Mudança de estado";
     const tempoManutencao = dados.tempo_manutencao || dados.tempo_estimado || null;

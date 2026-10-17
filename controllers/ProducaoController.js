@@ -87,6 +87,13 @@ async function podeAvancar(ordemId, organizacaoId, transaction) {
   return op?.requisicao_estado === "libertada";
 }
 
+// Regra "OP fechada": uma OP finalizada ou entregue não admite movimentos de
+// material (requisição, aprovação/saída, complemento). Só reabrindo a OP —
+// com motivo auditado no histórico — é possível registar novos movimentos.
+function opFechada(ordem) {
+  return ["finalizado", "entregue"].includes(ordem?.estado);
+}
+
 async function registarProcesso(ordemId, processo, dados) {
   const op = await OrdemProducao.findByPk(ordemId);
   if (!op) return;
@@ -322,6 +329,10 @@ exports.requisitarMateriais = async (req, res) => {
       await t.rollback();
       return res.status(422).json({ erro: "Esta OP já tem uma requisição registada" });
     }
+    if (opFechada(ordem)) {
+      await t.rollback();
+      return res.status(422).json({ erro: "Esta OP está fechada (finalizada ou entregue) e não admite novos movimentos. Reabra a OP com indicação do motivo para registar uma nova saída de material." });
+    }
     const b = req.body || {};
     const existentes = await ReservaEstoque.findAll({
       where: {
@@ -391,6 +402,10 @@ exports.aprovarMateriais = async (req, res) => {
     if (ordem.requisicao_estado === "libertada") {
       await t.rollback();
       return res.json({ mensagem: "Materiais já foram libertados", ordem: await OrdemProducao.findByPk(ordem.id, { include: includeOrdem() }) });
+    }
+    if (opFechada(ordem)) {
+      await t.rollback();
+      return res.status(422).json({ erro: "Esta OP está fechada (finalizada ou entregue) e não admite novos movimentos. Reabra a OP com indicação do motivo para registar a saída de material." });
     }
     if (ordem.requisicao_estado !== "requisitada") {
       await t.rollback();
@@ -605,6 +620,65 @@ exports.finalizarProducao = async (req, res) => {
     await t.rollback();
     console.error("Erro ao finalizar produção:", e);
     return res.status(500).json({ erro: "Erro ao finalizar produção" });
+  }
+};
+
+exports.reabrirOrdem = async (req, res) => {
+  const t = await sequelize.transaction();
+  try {
+    const ordem = await OrdemProducao.findOne({
+      where: { id: req.params.id, organizacao_id: req.organizacao_id },
+      transaction: t,
+    });
+    if (!ordem) {
+      await t.rollback();
+      return res.status(404).json({ erro: "Ordem não encontrada" });
+    }
+    if (!opFechada(ordem)) {
+      await t.rollback();
+      return res.status(422).json({ erro: "Apenas ordens finalizadas ou entregues podem ser reabertas" });
+    }
+    const motivo = String((req.body || {}).motivo || "").trim();
+    if (!motivo) {
+      await t.rollback();
+      return res.status(422).json({ erro: "Indique o motivo da reabertura para ficar registado no histórico" });
+    }
+    const estadoAnterior = ordem.estado;
+    const reabertaPor = req.usuario?.nome || req.usuario?.email || null;
+    await ordem.update(
+      {
+        estado: "em_producao",
+        entrega_ok: false,
+        reaberta_por: reabertaPor,
+        data_reabertura: new Date(),
+        motivo_reabertura: motivo,
+      },
+      { transaction: t }
+    );
+    await t.commit();
+    await registarProcesso(ordem.id, "reabertura", {
+      resultado: "reaberta",
+      estado_anterior: estadoAnterior,
+      estado_atual: "em_producao",
+      motivo,
+      reaberta_por: reabertaPor,
+    });
+    notificacoesService.criar({
+      organizacaoId: req.organizacao_id,
+      tipo: "producao",
+      nivel: "warning",
+      icone: "replay",
+      titulo: `OP reaberta — ${ordem.numero || ordem.id}`,
+      descricao: `A ordem voltou de "${estadoAnterior === "entregue" ? "entregue" : "finalizado"}" para produção. Motivo: ${motivo}`,
+      link: "/producao",
+      usuarioId: req.usuario.id,
+    });
+    const completa = await OrdemProducao.findByPk(ordem.id, { include: includeOrdem() });
+    return res.json(completa);
+  } catch (e) {
+    await t.rollback();
+    console.error("Erro ao reabrir ordem:", e);
+    return res.status(500).json({ erro: "Erro ao reabrir ordem" });
   }
 };
 

@@ -10,6 +10,11 @@ const Sistema = sequelize.define("sistema", {
   fuso_horario: { type: DataTypes.STRING(30), defaultValue: "Africa/Luanda (GMT+1)" },
   dias_aviso_ferias: { type: DataTypes.INTEGER, defaultValue: 30 },
   limite_ficheiros: { type: DataTypes.INTEGER, defaultValue: 10 },
+  // Compras: controlo por alçada — encomendas acima do limiar só podem ser
+  // encomendadas (enviadas ao fornecedor) após aprovação.
+  compras_exige_aprovacao: { type: DataTypes.BOOLEAN, defaultValue: true },
+  compras_alcada_valor: { type: DataTypes.DECIMAL(14, 2), defaultValue: 0 },
+  compras_alcada_valor_superior: { type: DataTypes.DECIMAL(14, 2), defaultValue: 0 },
 });
 
 module.exports = Sistema;

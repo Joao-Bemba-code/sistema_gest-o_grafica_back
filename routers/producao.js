@@ -17,6 +17,7 @@ router.post("/ordens/:id/complementar-materiais", requirePermissao("producao", "
 router.post("/ordens/:id/aprovar-materiais", requirePermissao("producao", "aprovar"), ProducaoController.aprovarMateriais);
 router.post("/ordens/:id/libertar-maquina", requirePermissao("producao", "editar"), ProducaoController.libertarParaMaquina);
 router.post("/ordens/:id/finalizar", requirePermissao("producao", "editar"), ProducaoController.finalizarProducao);
+router.post("/ordens/:id/reabrir", requirePermissao("producao", "editar"), ProducaoController.reabrirOrdem);
 
 router.put("/pre-impressao/:ordem_producao_id", requirePermissao("producao", "editar"), ProducaoController.salvarPreImpressao);
 router.put("/impressao/:ordem_producao_id", requirePermissao("producao", "editar"), ProducaoController.salvarImpressao);

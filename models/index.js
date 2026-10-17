@@ -33,6 +33,7 @@ const TesourariaMovimento = require("./TesourariaMovimento");
 const TesourariaAnexo = require("./TesourariaAnexo");
 const Divida = require("./Divida");
 const SerieAGT = require("./SerieAGT");
+const Bem = require("./Bem");
 
 Organizacao.hasMany(Usuario, { foreignKey: "organizacao_id" });
 Usuario.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
@@ -128,6 +129,9 @@ Faturacao.belongsTo(OrdemProducao, { foreignKey: "ordem_producao_id" });
 
 Organizacao.hasMany(SerieAGT, { foreignKey: "organizacao_id" });
 SerieAGT.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
+
+Organizacao.hasMany(Bem, { foreignKey: "organizacao_id" });
+Bem.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
 
 Organizacao.hasOne(Sistema, { foreignKey: "organizacao_id" });
 Sistema.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
@@ -226,4 +230,5 @@ module.exports = {
   TesourariaAnexo,
   Divida,
   SerieAGT,
+  Bem,
 };

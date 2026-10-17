@@ -564,17 +564,58 @@ exports.marcarPaga = async (req, res) => {
   }
 };
 
-exports.remover = async (req, res) => {
+// Anulação de fatura: o registo NUNCA é apagado — fica com estado "cancelada".
+// Movimentos de tesouraria ligados (pagamentos automáticos) são estornados:
+// os saldos das contas são repostos e os movimentos ficam "anulados".
+exports.anular = async (req, res) => {
   try {
     const fatura = await Faturacao.findOne({
       where: { id: req.params.id, organizacao_id: req.organizacao_id },
     });
     if (!fatura) return res.status(404).json({ erro: "Fatura não encontrada" });
-    await fatura.update({ deleted: 1, deletedAt: new Date() });
-    return res.json({ mensagem: "Fatura removida com sucesso" });
+    if (fatura.estado === "cancelada") {
+      return res.status(422).json({ erro: "Fatura já anulada" });
+    }
+    const motivo = req.body?.motivo ? String(req.body.motivo).trim() : null;
+    const movimentos = await TesourariaMovimento.findAll({
+      where: { fatura_id: fatura.id, organizacao_id: req.organizacao_id, estado: "confirmado" },
+    });
+    for (const movimento of movimentos) {
+      if (movimento.conta_bancaria_id) {
+        const conta = await ContaBancaria.findByPk(movimento.conta_bancaria_id);
+        if (conta) {
+          const novoSaldo = movimento.tipo === "entrada"
+            ? Number(conta.saldo_atual) - Number(movimento.valor)
+            : Number(conta.saldo_atual) + Number(movimento.valor);
+          await conta.update({ saldo_atual: Number(novoSaldo.toFixed(2)) });
+        }
+      }
+      if (movimento.tipo === "transferencia" && movimento.conta_destino_id) {
+        const contaDest = await ContaBancaria.findByPk(movimento.conta_destino_id);
+        if (contaDest) {
+          const novoSaldo = Number(contaDest.saldo_atual) - Number(movimento.valor);
+          await contaDest.update({ saldo_atual: Number(novoSaldo.toFixed(2)) });
+        }
+      }
+      await movimento.update({
+        estado: "anulado",
+        anulado_por: req.usuario?.nome || null,
+        data_anulacao: new Date(),
+        motivo_anulacao: `Estorno automático pela anulação da fatura ${fatura.numero}`,
+      });
+    }
+    await fatura.update({
+      estado: "cancelada",
+      anulado_por: req.usuario?.nome || null,
+      data_anulacao: new Date(),
+      motivo_anulacao: motivo,
+      valor_pago: 0,
+    });
+    const completa = await Faturacao.findByPk(fatura.id, { include: [{ model: Cliente, required: false }, { model: Orcamento, required: false }, { model: OrdemProducao, required: false }] });
+    return res.json({ ...completa.toJSON(), estornos: movimentos.length });
   } catch (e) {
-    console.error("Erro ao remover fatura:", e);
-    return res.status(500).json({ erro: "Erro ao remover fatura" });
+    console.error("Erro ao anular fatura:", e);
+    return res.status(500).json({ erro: "Erro ao anular fatura" });
   }
 };
 

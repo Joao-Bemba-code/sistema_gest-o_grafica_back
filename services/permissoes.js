@@ -7,6 +7,9 @@ const MODULOS = [
   "dividas",     // dívidas a receber de clientes
   "producao",    // ordens de produção, processos
   "estoque",     // provisionamento / materiais
+  "compras",     // compras / encomendas a fornecedores
+  "financeiro",  // análise financeira
+  "patrimonio",  // bens e equipamentos
   "maquinas",    // maquinária
   "categorias",  // recursos / categorias
   "relatorios",  // relatórios
@@ -37,6 +40,9 @@ const PERFIS = {
       tesouraria: { ver: true, criar: true, editar: true, eliminar: true, aprovar: true },
       dividas: { ver: true, criar: true, editar: true, eliminar: true, aprovar: true },
       estoque: { ver: true, criar: true, editar: true, eliminar: true, aprovar: true },
+      compras: { ver: true, criar: true, editar: true, eliminar: true, aprovar: true },
+      financeiro: { ver: true, criar: true, editar: true, eliminar: true, aprovar: true },
+      patrimonio: { ver: true, criar: true, editar: true, eliminar: true, aprovar: true },
       maquinas: { ver: true, criar: true, editar: true, eliminar: true, aprovar: true },
       categorias: { ver: true, criar: true, editar: true, eliminar: true, aprovar: true },
       producao: { ver: true, criar: false, editar: true, eliminar: false, aprovar: true },
@@ -55,6 +61,9 @@ const PERFIS = {
       tesouraria: { ver: false, criar: false, editar: false, eliminar: false, aprovar: false },
       dividas: { ver: false, criar: false, editar: false, eliminar: false, aprovar: false },
       estoque: { ver: false, criar: false, editar: false, eliminar: false, aprovar: false },
+      compras: { ver: true, criar: true, editar: false, eliminar: false, aprovar: false },
+      financeiro: { ver: false, criar: false, editar: false, eliminar: false, aprovar: false },
+      patrimonio: { ver: true, criar: false, editar: false, eliminar: false, aprovar: false },
       categorias: { ver: false, criar: false, editar: false, eliminar: false, aprovar: false },
       relatorios: { ver: false, criar: false, editar: false, eliminar: false, aprovar: false },
       configuracao: { ver: false, criar: false, editar: false, eliminar: false, aprovar: false },
@@ -70,6 +79,9 @@ const PERFIS = {
       dividas: { ver: true, criar: false, editar: false, eliminar: false, aprovar: false },
       producao: { ver: true, criar: false, editar: false, eliminar: false, aprovar: false },
       estoque: { ver: true, criar: false, editar: false, eliminar: false, aprovar: false },
+      compras: { ver: true, criar: false, editar: false, eliminar: false, aprovar: false },
+      financeiro: { ver: true, criar: false, editar: false, eliminar: false, aprovar: false },
+      patrimonio: { ver: true, criar: false, editar: false, eliminar: false, aprovar: false },
       maquinas: { ver: true, criar: false, editar: false, eliminar: false, aprovar: false },
       categorias: { ver: true, criar: false, editar: false, eliminar: false, aprovar: false },
       relatorios: { ver: true, criar: false, editar: false, eliminar: false, aprovar: false },

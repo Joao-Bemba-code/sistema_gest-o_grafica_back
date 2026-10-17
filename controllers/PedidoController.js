@@ -1,7 +1,8 @@
-const { sequelize, Pedido, PedidoItem, Material, MovimentoEstoque, Sequencia } = require("../models");
+const { sequelize, Pedido, PedidoItem, Material, MovimentoEstoque, Sequencia, Sistema } = require("../models");
 const { Transaction } = require("sequelize");
+const notificacoesService = require("../services/notificacoes");
 
-const ESTADOS = ["enviado", "recebido", "cancelado"];
+const ESTADOS = ["pendente", "aprovado", "enviado", "recebido", "rejeitado", "cancelado"];
 
 function parseNum(v) {
   if (v === undefined || v === null || v === "") return 0;
@@ -48,6 +49,10 @@ function serializar(p) {
     estado: p.estado,
     observacoes: p.observacoes,
     solicitado_por: p.solicitado_por,
+    aprovado_por: p.aprovado_por,
+    data_aprovacao: p.data_aprovacao,
+    motivo_rejeicao: p.motivo_rejeicao || "",
+    data_envio: p.data_envio,
     data_pedido: p.data_pedido || p.createdAt,
     data_recebimento: p.data_recebimento,
     total: Number(p.total) || 0,
@@ -128,16 +133,25 @@ exports.criar = async (req, res) => {
     }
     const numero = await proximoNumero(req.organizacao_id);
     const total = Number(normalizados.reduce((s, i) => s + i.total, 0).toFixed(2));
+
+    // Alçada de compras: acima do limiar a encomenda fica "pendente" e só é
+    // encomendada (estado "enviado") depois de aprovada.
+    const sistema = await Sistema.findOne({ where: { organizacao_id: req.organizacao_id } });
+    const exigeAprovacao = !!(sistema && sistema.compras_exige_aprovacao);
+    const limiteAlcada = sistema ? Number(sistema.compras_alcada_valor) || 0 : 0;
+    const requerAprovacao = exigeAprovacao && total > limiteAlcada;
+
     const pedido = await Pedido.create(
       {
         numero,
         organizacao_id: req.organizacao_id,
         fornecedor_id: fornecedor_id || null,
         fornecedor_nome: String(fornecedor_nome).trim(),
-        estado: "enviado",
+        estado: requerAprovacao ? "pendente" : "enviado",
         observacoes: observacoes || null,
         solicitado_por: solicitado_por || null,
         data_pedido: data_pedido || new Date(),
+        data_envio: requerAprovacao ? null : new Date(),
         total,
         usuario_id: req.usuario.id,
       },
@@ -148,6 +162,20 @@ exports.criar = async (req, res) => {
       { transaction: t }
     );
     await t.commit();
+    try {
+      await notificacoesService.criar({
+        organizacaoId: req.organizacao_id,
+        tipo: "estoque",
+        nivel: requerAprovacao ? "warning" : "info",
+        icone: requerAprovacao ? "hourglass_top" : "local_shipping",
+        titulo: `Encomenda ${numero} ${requerAprovacao ? "aguarda aprovação" : "enviada"}`,
+        descricao: `${normalizados.length} material(is) para ${String(fornecedor_nome).trim()} · ${Number(total.toFixed(2))} Kz`,
+        link: "/compras",
+        usuarioId: req.usuario.id,
+      });
+    } catch (e) {
+      console.error("Erro ao notificar encomenda:", e);
+    }
     const completo = await Pedido.findByPk(pedido.id, { include: [{ model: PedidoItem, required: false }] });
     return res.status(201).json(serializar(completo));
   } catch (e) {
@@ -175,6 +203,111 @@ exports.cancelar = async (req, res) => {
   }
 };
 
+// Aprovação por alçada. A encomenda está "pendente" até ser aprovada; acima do
+// limiar superior a aprovação só pode ser dada pela Administração/Gestão.
+exports.aprovar = async (req, res) => {
+  try {
+    const pedido = await Pedido.findOne({
+      where: { id: req.params.id, organizacao_id: req.organizacao_id },
+      include: [{ model: PedidoItem, required: false }],
+    });
+    if (!pedido) return res.status(404).json({ erro: "Pedido não encontrado" });
+    if (pedido.estado !== "pendente") {
+      return res.status(422).json({ erro: `Só é possível aprovar encomendas pendentes (actual: ${pedido.estado})` });
+    }
+    const sistema = await Sistema.findOne({ where: { organizacao_id: req.organizacao_id } });
+    const superior = sistema ? Number(sistema.compras_alcada_valor_superior) || 0 : 0;
+    const total = Number(pedido.total) || 0;
+    const exigeNivelSuperior = superior > 0 && total > superior;
+    if (exigeNivelSuperior && !["admin", "gestao"].includes(req.usuario?.perfil)) {
+      return res.status(403).json({ erro: "Esta encomenda está acima da alçada — só pode ser aprovada pela Administração/Gestão." });
+    }
+    await pedido.update({
+      estado: "aprovado",
+      aprovado_por: req.usuario?.nome || null,
+      data_aprovacao: new Date(),
+      motivo_rejeicao: null,
+    });
+    try {
+      await notificacoesService.criar({
+        organizacaoId: req.organizacao_id,
+        tipo: "estoque",
+        nivel: "success",
+        icone: "verified",
+        titulo: `Encomenda ${pedido.numero} aprovada`,
+        descricao: `Aprovada por ${req.usuario?.nome || "Gestão"} · ${total} Kz. Já pode ser enviada ao fornecedor.`,
+        link: "/compras",
+        usuarioId: req.usuario?.id || null,
+      });
+    } catch (e) {
+      console.error("Erro ao notificar aprovação da encomenda:", e);
+    }
+    return res.json(serializar(pedido));
+  } catch (e) {
+    console.error("Erro ao aprovar pedido:", e);
+    return res.status(500).json({ erro: "Erro ao aprovar pedido" });
+  }
+};
+
+exports.rejeitar = async (req, res) => {
+  try {
+    const pedido = await Pedido.findOne({
+      where: { id: req.params.id, organizacao_id: req.organizacao_id },
+      include: [{ model: PedidoItem, required: false }],
+    });
+    if (!pedido) return res.status(404).json({ erro: "Pedido não encontrado" });
+    if (pedido.estado !== "pendente") {
+      return res.status(422).json({ erro: `Só é possível rejeitar encomendas pendentes (actual: ${pedido.estado})` });
+    }
+    const motivo = String(req.body?.motivo || "").trim();
+    if (!motivo) return res.status(422).json({ erro: "Indique o motivo da rejeição" });
+    await pedido.update({
+      estado: "rejeitado",
+      motivo_rejeicao: motivo.slice(0, 400),
+      aprovado_por: req.usuario?.nome || null,
+      data_aprovacao: new Date(),
+    });
+    try {
+      await notificacoesService.criar({
+        organizacaoId: req.organizacao_id,
+        tipo: "estoque",
+        nivel: "error",
+        icone: "cancel",
+        titulo: `Encomenda ${pedido.numero} rejeitada`,
+        descricao: `Recusada por ${req.usuario?.nome || "Gestão"}. Motivo: ${motivo.slice(0, 400)}.`,
+        link: "/compras",
+        usuarioId: req.usuario?.id || null,
+      });
+    } catch (e) {
+      console.error("Erro ao notificar rejeição da encomenda:", e);
+    }
+    const completo = await Pedido.findByPk(pedido.id, { include: [{ model: PedidoItem, required: false }] });
+    return res.json(serializar(completo));
+  } catch (e) {
+    console.error("Erro ao rejeitar pedido:", e);
+    return res.status(500).json({ erro: "Erro ao rejeitar pedido" });
+  }
+};
+
+// Encomendar = enviar ao fornecedor. Só é possível depois da aprovação.
+exports.enviar = async (req, res) => {
+  try {
+    const pedido = await Pedido.findOne({
+      where: { id: req.params.id, organizacao_id: req.organizacao_id },
+      include: [{ model: PedidoItem, required: false }],
+    });
+    if (!pedido) return res.status(404).json({ erro: "Pedido não encontrado" });
+    if (pedido.estado !== "aprovado") {
+      return res.status(422).json({ erro: "Só é possível encomendar ao fornecedor depois da aprovação" });
+    }
+    await pedido.update({ estado: "enviado", data_envio: new Date() });
+    return res.json(serializar(pedido));
+  } catch (e) {
+    console.error("Erro ao enviar pedido:", e);
+    return res.status(500).json({ erro: "Erro ao enviar pedido" });
+  }
+};
+
 exports.receber = async (req, res) => {
   const t = await sequelize.transaction();
   try {
@@ -190,6 +323,10 @@ exports.receber = async (req, res) => {
     if (pedido.estado === "cancelado") {
       await t.rollback();
       return res.status(422).json({ erro: "Não é possível receber um pedido cancelado" });
+    }
+    if (pedido.estado !== "enviado") {
+      await t.rollback();
+      return res.status(422).json({ erro: "Só é possível receber encomendas enviadas ao fornecedor" });
     }
     const recebimentos = Array.isArray(req.body?.itens) ? req.body.itens : [];
     if (!recebimentos.length) {

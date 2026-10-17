@@ -12,6 +12,8 @@ const RequisicaoMaterialItem = sequelize.define("requisicao_material_item", {
   quantidade: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
   // quantidade efectivamente saída do stock no momento da aprovação
   quantidade_atendida: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
+  // quantidade já devolvida ao stock (nunca pode exceder a atendida)
+  quantidade_devolvida: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
   observacoes: { type: DataTypes.STRING(300) },
   deleted: { type: DataTypes.BOOLEAN, defaultValue: false },
   deletedAt: { type: DataTypes.DATE, allowNull: true },
