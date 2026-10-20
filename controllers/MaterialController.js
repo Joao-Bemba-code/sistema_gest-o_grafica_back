@@ -1,24 +1,37 @@
 const { sequelize, Material, MovimentoEstoque, Categoria, ReservaEstoque, OrdemProducao } = require("../models");
 const estoqueService = require("../services/estoque");
 
-const FAMILIA_PREFIXO = {
-  papeis: "PAP",
-  tintas: "TIN",
-  chapas: "CHA",
-  produto_quimico: "PQU",
-  equipamentos: "EQU",
-  ferramentas: "FER",
-  suporte_especial: "SPE",
-  material_acabamento: "MAC",
-  consumiveis: "CON",
-};
+const PARAVRAS_IGNORADAS = new Set(["e", "de", "da", "do", "das", "dos", "para"]);
 
-async function gerarCodigo(organizacaoId, familia) {
-  const prefixo = FAMILIA_PREFIXO[familia] || "MAT";
+// Extrai as iniciais do nome da categoria (ex.: "Papel Offset" -> "PO"; sem categoria -> "GEN").
+function iniciaisDaCategoria(categoria) {
+  const palavras = String(categoria || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .split(/[\s/]+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  const relevantes = palavras.filter((p) => !PARAVRAS_IGNORADAS.has(p.toLowerCase()));
+  const base = (relevantes.length ? relevantes : palavras)
+    .map((p) => p.charAt(0).toUpperCase())
+    .join("");
+  return base || "GEN";
+}
+
+// O frontend envia o nome da categoria dentro de especificacoes.categoria.
+function nomeCategoriaDosDados(dados) {
+  let espec = dados.especificacoes;
+  if (typeof espec === "string") {
+    try { espec = JSON.parse(espec); } catch (e) { espec = {}; }
+  }
+  return String((espec && espec.categoria) || "").trim();
+}
+
+async function gerarCodigo(organizacaoId, nomeCategoria) {
+  const prefixo = `K${iniciaisDaCategoria(nomeCategoria)}`;
   const materiais = await Material.findAll({
     where: { organizacao_id: organizacaoId, deleted: false },
     attributes: ["codigo"],
-    order: [["id", "DESC"]],
   });
   let maxNum = 0;
   for (const m of materiais) {
@@ -126,12 +139,12 @@ exports.buscarPorId = async (req, res) => {
 exports.criar = async (req, res) => {
   try {
     const dados = normalizarDados(req.body);
-    if ((!dados.codigo || dados.codigo.trim() === "") && dados.categoria_id) {
+    let nomeCategoria = nomeCategoriaDosDados(dados);
+    if (dados.categoria_id) {
       const cat = await Categoria.findOne({ where: { id: dados.categoria_id } });
-      if (cat) {
-        dados.codigo = await gerarCodigo(req.organizacao_id, cat.familia);
-      }
+      if (cat && cat.nome) nomeCategoria = cat.nome;
     }
+    dados.codigo = await gerarCodigo(req.organizacao_id, nomeCategoria);
     const material = await Material.create({ ...dados, organizacao_id: req.organizacao_id });
     return res.status(201).json(serializar(material));
   } catch (e) {
@@ -147,6 +160,18 @@ exports.atualizar = async (req, res) => {
     });
     if (!material) return res.status(404).json({ erro: "Material não encontrado" });
     const dados = normalizarDados(req.body);
+    // O código é gerado automaticamente na criação e não volta a mudar;
+    // artigos antigos sem código recebem um (ex.: KPO-0001) ao serem editados.
+    delete dados.codigo;
+    if (!material.codigo) {
+      let nomeCategoria = nomeCategoriaDosDados(dados);
+      const catId = dados.categoria_id || material.categoria_id;
+      if (catId) {
+        const cat = await Categoria.findOne({ where: { id: catId } });
+        if (cat && cat.nome) nomeCategoria = cat.nome;
+      }
+      dados.codigo = await gerarCodigo(req.organizacao_id, nomeCategoria);
+    }
     await material.update(dados);
     return res.json(serializar(material));
   } catch (e) {
