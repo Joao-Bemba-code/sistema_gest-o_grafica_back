@@ -1,5 +1,34 @@
 const { Bem } = require("../models");
 
+const PARAVRAS_IGNORADAS = new Set(["e", "de", "da", "do", "das", "dos", "para"]);
+
+// Extrai as iniciais da categoria para o código do bem (KPAT-MEI, KPAT-EI, KPAT-MEA, ...).
+function iniciaisDaCategoria(categoria) {
+  const palavras = String(categoria || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .split(/[\s/]+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  const relevantes = palavras.filter((p) => !PARAVRAS_IGNORADAS.has(p.toLowerCase()));
+  const base = (relevantes.length ? relevantes : palavras)
+    .map((p) => p.charAt(0).toUpperCase())
+    .join("");
+  return base || "GEN";
+}
+
+async function gerarCodigoBem(organizacao_id, categoria) {
+  const prefixo = `KPAT-${iniciaisDaCategoria(categoria)}`;
+  const bens = await Bem.findAll({ where: { organizacao_id }, attributes: ["codigo"] });
+  let maximo = 0;
+  const re = new RegExp(`^${prefixo}-(\\d+)$`);
+  bens.forEach((b) => {
+    const m = re.exec(String(b.codigo || ""));
+    if (m) maximo = Math.max(maximo, parseInt(m[1], 10));
+  });
+  return `${prefixo}-${String(maximo + 1).padStart(4, "0")}`;
+}
+
 exports.listar = async (req, res) => {
   try {
     const bens = await Bem.findAll({
@@ -27,6 +56,9 @@ exports.buscarPorId = async (req, res) => {
 exports.criar = async (req, res) => {
   try {
     const dados = { ...req.body, organizacao_id: req.organizacao_id };
+    if (!dados.codigo || !String(dados.codigo).trim()) {
+      dados.codigo = await gerarCodigoBem(req.organizacao_id, dados.categoria);
+    }
     const bem = await Bem.create(dados);
     return res.status(201).json(bem);
   } catch (e) {

@@ -32,6 +32,31 @@ async function aplicarMigracoesMysql(sequelize) {
   // Histórico de mudanças de estado das máquinas (JSON: [{estado,data,motivo}])
   await adicionar("maquina", "historico_estados", "JSON NULL");
 
+  // Classificação patrimonial dos bens: família, subfamília, grupo e tipo.
+  await adicionar("bem", "familia", "VARCHAR(100) NULL");
+  await adicionar("bem", "subfamilia", "VARCHAR(100) NULL");
+  await adicionar("bem", "grupo", "VARCHAR(100) NULL");
+  await adicionar("bem", "tipo", "VARCHAR(100) NULL");
+
+  // Estado do bem: acrescenta 'avariado' ao ENUM.
+  const bemEstRef = await sequelize.query(
+    "SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'bem' AND COLUMN_NAME = 'estado'",
+    { type: sequelize.QueryTypes.SELECT }
+  );
+  if (bemEstRef.length && !bemEstRef[0].COLUMN_TYPE.includes("avariado")) {
+    try {
+      await sequelize.query("SET SESSION sql_mode = 'NO_ENGINE_SUBSTITUTION'");
+      await sequelize.query(
+        "ALTER TABLE `bem` MODIFY `estado` ENUM('ativo','manutencao','abate','avariado') DEFAULT 'ativo'"
+      );
+      console.log("MIGRAÇÃO: bem.estado inclui 'avariado'");
+    } catch (e) {
+      if (e.code === "WARN_DATA_TRUNCATED" || e.parent?.code === "WARN_DATA_TRUNCATED") {
+        console.log("MIGRAÇÃO: bem.estado actualizado");
+      } else throw e;
+    }
+  }
+
   // Equipamentos por defeito não movimentam estoque (permanecem como registo/máquina).
   await sequelize.query(
     `UPDATE material m
