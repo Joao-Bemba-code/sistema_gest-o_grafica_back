@@ -60,6 +60,7 @@ function criarApp(opcoes = {}) {
     app.use("/api/dividas", require("./routers/dividas"));
     app.use("/api/bens", require("./routers/bens"));
     app.use("/api/sinc", require("./routers/sincronizacao"));
+    app.use("/api/suporte", require("./routers/suporte"));
     app.get("/api/health", (req, res) => res.json({ ok: true, hora: new Date().toISOString() }));
   }
 

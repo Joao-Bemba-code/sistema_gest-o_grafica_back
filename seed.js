@@ -1,5 +1,17 @@
 const bcrypt = require("bcryptjs");
-const { sequelize, Organizacao, Usuario, Categoria } = require("./models");
+const crypto = require("crypto");
+const { sequelize, Organizacao, Usuario, Categoria, SuporteUsuario } = require("./models");
+
+const CARACTERES_SENHA = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789!@#$%";
+
+function gerarSenha(tamanho = 12) {
+  const bytes = crypto.randomBytes(tamanho * 2);
+  let senha = "";
+  for (let i = 0; i < tamanho; i++) {
+    senha += CARACTERES_SENHA[bytes[i] % CARACTERES_SENHA.length];
+  }
+  return senha;
+}
 
 async function seed() {
   try {
@@ -112,6 +124,23 @@ async function seed() {
     ];
     for (const cat of categoriasSeed) {
       await criarCategoria(cat);
+    }
+
+    // Conta inicial do painel de suporte técnico (área separada do SIGRAF).
+    const emailSuporte = process.env.SUPORTE_SEED_EMAIL || "suporte@sigraf.local";
+    const senhaSuporte = process.env.SUPORTE_SEED_SENHA || gerarSenha();
+    const [suporte, suporteCriado] = await SuporteUsuario.findOrCreate({
+      where: { email: emailSuporte },
+      defaults: {
+        nome: "Suporte Técnico",
+        email: emailSuporte,
+        senha: await bcrypt.hash(senhaSuporte, 10),
+      },
+    });
+    if (suporteCriado || process.env.SUPORTE_SEED_SENHA) {
+      console.log("🎫 Conta de suporte:", suporteCriado ? "criada" : "actualizada (definida no env)");
+      console.log("📧 Email:", emailSuporte);
+      console.log("🔑 Senha:", senhaSuporte);
     }
 
     console.log("✅ Seed concluído!");

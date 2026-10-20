@@ -34,6 +34,8 @@ const TesourariaAnexo = require("./TesourariaAnexo");
 const Divida = require("./Divida");
 const SerieAGT = require("./SerieAGT");
 const Bem = require("./Bem");
+const SuporteUsuario = require("./SuporteUsuario");
+const SuporteAuditoria = require("./SuporteAuditoria");
 
 Organizacao.hasMany(Usuario, { foreignKey: "organizacao_id" });
 Usuario.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
@@ -231,4 +233,6 @@ module.exports = {
   Divida,
   SerieAGT,
   Bem,
+  SuporteUsuario,
+  SuporteAuditoria,
 };
