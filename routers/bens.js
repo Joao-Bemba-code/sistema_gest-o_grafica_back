@@ -8,6 +8,7 @@ router.use(auth);
 router.get("/", requirePermissao("patrimonio", "ver"), BemController.listar);
 router.get("/:id", requirePermissao("patrimonio", "ver"), BemController.buscarPorId);
 router.post("/", requirePermissao("patrimonio", "criar"), BemController.criar);
+router.post("/eliminar-categoria", requirePermissao("patrimonio", "eliminar"), BemController.eliminarCategoria);
 router.put("/:id", requirePermissao("patrimonio", "editar"), BemController.atualizar);
 router.delete("/:id", requirePermissao("patrimonio", "eliminar"), BemController.remover);
 
