@@ -300,6 +300,15 @@ async function aplicarMigracoesMysql(sequelize) {
     `MIGRAÇÃO: tabelas tesouraria presentes: ${tesCr[0]?.c ?? 0}/2` +
       (tesCr[0]?.c === 2 ? " (prontas)" : " (criadas automaticamente pelo sync)")
   );
+
+  // Códigos de artigos de stock passam todos a K + iniciais da categoria (KPO-0001).
+  // Idempotente: só muda códigos fora da regra; conformes ficam intactos.
+  try {
+    const { recodificarMateriaisK } = require("./services/codigoArtigo");
+    await recodificarMateriaisK(sequelize);
+  } catch (e) {
+    console.log(`MIGRAÇÃO: recodificação de artigos — ${e.message}`);
+  }
 }
 
 

@@ -1,34 +1,10 @@
 const { sequelize, Material, MovimentoEstoque, Categoria, ReservaEstoque, OrdemProducao } = require("../models");
 const estoqueService = require("../services/estoque");
+const { prefixoK, nomeCategoriaDosDados } = require("../services/codigoArtigo");
 
-const PARAVRAS_IGNORADAS = new Set(["e", "de", "da", "do", "das", "dos", "para"]);
-
-// Extrai as iniciais do nome da categoria (ex.: "Papel Offset" -> "PO"; sem categoria -> "GEN").
-function iniciaisDaCategoria(categoria) {
-  const palavras = String(categoria || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .split(/[\s/]+/)
-    .map((p) => p.trim())
-    .filter(Boolean);
-  const relevantes = palavras.filter((p) => !PARAVRAS_IGNORADAS.has(p.toLowerCase()));
-  const base = (relevantes.length ? relevantes : palavras)
-    .map((p) => p.charAt(0).toUpperCase())
-    .join("");
-  return base || "GEN";
-}
-
-// O frontend envia o nome da categoria dentro de especificacoes.categoria.
-function nomeCategoriaDosDados(dados) {
-  let espec = dados.especificacoes;
-  if (typeof espec === "string") {
-    try { espec = JSON.parse(espec); } catch (e) { espec = {}; }
-  }
-  return String((espec && espec.categoria) || "").trim();
-}
-
+// Código automático: K + iniciais da categoria + sequência (ex.: KPO-0001).
 async function gerarCodigo(organizacaoId, nomeCategoria) {
-  const prefixo = `K${iniciaisDaCategoria(nomeCategoria)}`;
+  const prefixo = prefixoK(nomeCategoria);
   const materiais = await Material.findAll({
     where: { organizacao_id: organizacaoId, deleted: false },
     attributes: ["codigo"],
