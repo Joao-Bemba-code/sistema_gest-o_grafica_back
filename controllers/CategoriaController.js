@@ -40,17 +40,26 @@ exports.listar = async (req, res) => {
   }
 };
 
-// Uma família pode ter várias categorias: o que distingue é o GRUPO (tipo)
-// e/ou a SUBFAMÍLIA. Só bloqueamos quando os três coincidem.
-async function categoriaDuplicada(organizacaoId, { familia, subfamilia, tipo }, ignorarId = null) {
+// Uma categoria é identificada pelo NOME + família + subfamília + grupo.
+// Várias categorias podem partilhar o mesmo trio desde que tenham nomes
+// diferentes (ex.: categorias escritas diretamente no formulário de material).
+// Só bloqueamos quando os quatro coincidem.
+async function categoriaDuplicada(organizacaoId, { nome, familia, subfamilia, tipo }, ignorarId = null) {
   const normalizar = (s) => String(s || "").trim().toLowerCase();
-  const alvo = { familia: normalizar(familia), subfamilia: normalizar(subfamilia), tipo: normalizarTipo(tipo) };
+  const normalizarNome = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase().replace(/\s+/g, " ");
+  const alvo = {
+    nome: normalizarNome(nome || familia),
+    familia: normalizar(familia),
+    subfamilia: normalizar(subfamilia),
+    tipo: normalizarTipo(tipo),
+  };
   const categorias = await Categoria.findAll({
     where: { organizacao_id: organizacaoId, deleted: false },
   });
   return categorias.some((c) => {
     if (String(c.id) === String(ignorarId)) return false;
-    return normalizar(c.familia) === alvo.familia
+    return normalizarNome(c.nome || c.familia) === alvo.nome
+      && normalizar(c.familia) === alvo.familia
       && normalizar(c.subfamilia) === alvo.subfamilia
       && normalizarTipo(c.tipo) === alvo.tipo;
   });
@@ -66,19 +75,19 @@ function comNomePadrao(dados) {
 exports.criar = async (req, res) => {
   let dados;
   try {
-    dados = { ...req.body, organizacao_id: req.organizacao_id };
+    dados = comNomePadrao({ ...req.body, organizacao_id: req.organizacao_id });
     delete dados.grupo;
     const dup = await categoriaDuplicada(req.organizacao_id, dados);
     if (dup) {
-      return res.status(409).json({ erro: "Já existe uma categoria com a mesma Família, Subfamília e Grupo. Pode criar outra na mesma família — basta alterar o Grupo ou a Subfamília." });
+      return res.status(409).json({ erro: "Já existe uma categoria com o mesmo nome, Família, Subfamília e Grupo." });
     }
-    const categoria = await Categoria.create(comNomePadrao(dados));
+    const categoria = await Categoria.create(dados);
     return res.status(201).json(categoria);
   } catch (e) {
     if (truncadoFamilia(e)) {
       try {
         await garantirFamiliaVarchar();
-        const categoria = await Categoria.create(comNomePadrao(dados));
+        const categoria = await Categoria.create(dados);
         return res.status(201).json(categoria);
       } catch (e2) {
         console.error("Erro ao criar categoria (após corrigir familia):", e2);
@@ -118,21 +127,29 @@ exports.atualizar = async (req, res) => {
     if (dados.nome !== undefined && !String(dados.nome).trim() && dados.familia !== undefined) {
       delete dados.nome;
     }
+    const familiaFinal = dados.familia ?? categoria.familia;
+    // Ao editar por outros módulos o nome não é enviado; preserva-se o atual.
+    const nomeFinal = dados.nome !== undefined
+      ? String(dados.nome).trim() || String(familiaFinal || "").trim() || "sem-familia"
+      : String(categoria.nome || categoria.familia || "").trim() || "sem-familia";
     const alvo = {
-      familia: dados.familia ?? categoria.familia,
+      nome: nomeFinal,
+      familia: familiaFinal,
       subfamilia: dados.subfamilia ?? categoria.subfamilia,
       tipo: dados.tipo ?? categoria.tipo,
     };
     if (await categoriaDuplicada(req.organizacao_id, alvo, categoria.id)) {
-      return res.status(409).json({ erro: "Já existe outra categoria com a mesma Família, Subfamília e Grupo. Mude o Grupo ou a Subfamília." });
+      return res.status(409).json({ erro: "Já existe outra categoria com o mesmo nome, Família, Subfamília e Grupo." });
     }
+    const dadosAtualizacao = { ...dados };
+    if (dados.nome !== undefined) dadosAtualizacao.nome = nomeFinal;
     try {
-      await categoria.update(comNomePadrao(dados));
+      await categoria.update(dadosAtualizacao);
       return res.json(categoria);
     } catch (e) {
       if (!truncadoFamilia(e)) throw e;
       await garantirFamiliaVarchar();
-      await categoria.update(comNomePadrao(dados));
+      await categoria.update(dadosAtualizacao);
       return res.json(categoria);
     }
   } catch (e) {
