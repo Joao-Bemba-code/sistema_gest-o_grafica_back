@@ -7,12 +7,16 @@ function iniciaisDaCategoria(categoria) {
   const palavras = String(categoria || "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .split(/[\s/]+/)
+    .split(/[\s/|>»›:;,.()\[\]]+/)
     .map((p) => p.trim())
     .filter(Boolean);
   const relevantes = palavras.filter((p) => !PARAVRAS_IGNORADAS.has(p.toLowerCase()));
   const base = (relevantes.length ? relevantes : palavras)
-    .map((p) => p.charAt(0).toUpperCase())
+    .map((p) => {
+      const letra = p.match(/[A-Za-z0-9]/);
+      return letra ? letra[0].toUpperCase() : "";
+    })
+    .filter(Boolean)
     .join("");
   return base || "GEN";
 }
