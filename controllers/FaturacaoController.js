@@ -135,10 +135,16 @@ function montarDocumentoAGT(fatura, cliente, nif, serie) {
   const percentual = parseFloat(fatura.iva);
   const pctFinal = !isNaN(percentual) ? percentual : cfg.ivaDefault;
 
+  // A AGT exige que, fora das notas de crédito, a soma dos valores a crédito
+  // das linhas seja superior à dos valores a débito. Vendas (FT, FR, VD) levam
+  // creditAmount; só a NC usa debitAmount.
+  const usaCredito = serie.documentType !== "NC";
+
   const linhas = (fatura.itens || []).map((i, idx) => {
     const quantidade = Number(i.quantidade) || 0;
     const preco = Number(i.preco_unit) || 0;
     const total = Number(i.total) || Number((quantidade * preco).toFixed(2));
+    const valorLinha = Number(total.toFixed(2));
     return {
       lineNumber: idx + 1,
       operationType: "TB",
@@ -148,18 +154,20 @@ function montarDocumentoAGT(fatura, cliente, nif, serie) {
       unitOfMeasure: "UN",
       unitPriceBase: preco,
       unitPrice: preco,
-      debitAmount: Number(total.toFixed(2)),
+      creditAmount: usaCredito ? valorLinha : 0,
+      debitAmount: usaCredito ? 0 : valorLinha,
       settlementAmount: 0,
       taxes: [],
     };
   });
 
-  const somaBase = linhas.reduce((s, l) => s + l.debitAmount, 0);
+  const somaBase = linhas.reduce((s, l) => s + l.creditAmount - l.debitAmount, 0);
   let taxaRestante = taxPayable;
   linhas.forEach((l, idx) => {
+    const valorLinha = l.creditAmount - l.debitAmount;
     let contribuicao = 0;
     if (somaBase > 0) {
-      contribuicao = idx === linhas.length - 1 ? Number(taxaRestante.toFixed(2)) : arredondarExcesso(taxPayable * (l.debitAmount / somaBase));
+      contribuicao = idx === linhas.length - 1 ? Number(taxaRestante.toFixed(2)) : arredondarExcesso(taxPayable * (valorLinha / somaBase));
       taxaRestante = Number((taxaRestante - contribuicao).toFixed(2));
     }
     l.taxes =

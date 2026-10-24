@@ -36,6 +36,10 @@ const SerieAGT = require("./SerieAGT");
 const Bem = require("./Bem");
 const SuporteUsuario = require("./SuporteUsuario");
 const SuporteAuditoria = require("./SuporteAuditoria");
+const CaixaSessao = require("./CaixaSessao");
+const RateioCusto = require("./RateioCusto");
+const Proposta = require("./Proposta");
+const PropostaEvento = require("./PropostaEvento");
 
 Organizacao.hasMany(Usuario, { foreignKey: "organizacao_id" });
 Usuario.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
@@ -196,6 +200,30 @@ Divida.belongsTo(ContaBancaria, { foreignKey: "conta_bancaria_id", as: "conta" }
 Usuario.hasMany(Divida, { foreignKey: "usuario_id", as: "dividas_criadas" });
 Divida.belongsTo(Usuario, { foreignKey: "usuario_id", as: "usuario" });
 
+Organizacao.hasMany(CaixaSessao, { foreignKey: "organizacao_id" });
+CaixaSessao.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
+ContaBancaria.hasMany(CaixaSessao, { foreignKey: "conta_bancaria_id", as: "sessoes_caixa" });
+CaixaSessao.belongsTo(ContaBancaria, { foreignKey: "conta_bancaria_id", as: "conta" });
+
+Organizacao.hasMany(RateioCusto, { foreignKey: "organizacao_id" });
+RateioCusto.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
+TesourariaMovimento.hasMany(RateioCusto, { foreignKey: "movimento_id", as: "rateios" });
+RateioCusto.belongsTo(TesourariaMovimento, { foreignKey: "movimento_id", as: "movimento" });
+OrdemProducao.hasMany(RateioCusto, { foreignKey: "ordem_producao_id", as: "rateios" });
+RateioCusto.belongsTo(OrdemProducao, { foreignKey: "ordem_producao_id", as: "ordem" });
+
+Organizacao.hasMany(Proposta, { foreignKey: "organizacao_id" });
+Proposta.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
+Cliente.hasMany(Proposta, { foreignKey: "cliente_id" });
+Proposta.belongsTo(Cliente, { foreignKey: "cliente_id" });
+Usuario.hasMany(Proposta, { foreignKey: "usuario_id", as: "propostas" });
+Proposta.belongsTo(Usuario, { foreignKey: "usuario_id", as: "usuario" });
+Orcamento.hasMany(Proposta, { foreignKey: "orcamento_id", as: "propostas" });
+Proposta.belongsTo(Orcamento, { foreignKey: "orcamento_id", as: "orcamento" });
+Proposta.hasMany(PropostaEvento, { foreignKey: "proposta_id", as: "eventos" });
+PropostaEvento.belongsTo(Proposta, { foreignKey: "proposta_id" });
+PropostaEvento.belongsTo(Usuario, { foreignKey: "usuario_id", as: "usuario" });
+
 module.exports = {
   sequelize,
   Organizacao,
@@ -235,4 +263,8 @@ module.exports = {
   Bem,
   SuporteUsuario,
   SuporteAuditoria,
+  CaixaSessao,
+  RateioCusto,
+  Proposta,
+  PropostaEvento,
 };

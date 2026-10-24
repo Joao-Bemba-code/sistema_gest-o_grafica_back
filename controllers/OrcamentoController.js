@@ -217,8 +217,14 @@ function serializar(o) {
     prazoExecucao: o.prazo_execucao,
     condicoesPagamento: o.condicoes_pagamento,
     observacoes: o.observacoes,
+    responsavel: o.responsavel || "",
     ordem_producao: o.ordem_producao
-      ? { id: o.ordem_producao.id, numero: o.ordem_producao.numero, estado: o.ordem_producao.estado }
+      ? {
+          id: o.ordem_producao.id,
+          numero: o.ordem_producao.numero,
+          estado: o.ordem_producao.estado,
+          data_entrega: o.ordem_producao.data_entrega || null,
+        }
       : null,
   };
 }
@@ -229,7 +235,7 @@ async function buscarOrdensMapa(orcamentos, organizacao_id) {
   const ids = orcamentos.map((o) => o.id);
   const ordens = await OrdemProducao.findAll({
     where: { organizacao_id, orcamento_id: ids },
-    attributes: ["id", "orcamento_id", "numero", "estado"],
+    attributes: ["id", "orcamento_id", "numero", "estado", "data_entrega"],
   });
   return new Map(ordens.map((op) => [op.orcamento_id, op]));
 }
@@ -238,6 +244,22 @@ function comOrdemProducao(orcamento, mapa) {
   const dados = orcamento.toJSON ? orcamento.toJSON() : orcamento;
   dados.ordem_producao = mapa.get(orcamento.id) || null;
   return dados;
+}
+
+// Nome do utilizador que criou o orçamento — responsável da proposta.
+async function buscarResponsaveisMapa(orcamentos, organizacao_id) {
+  const ids = [...new Set((orcamentos || []).map((o) => o.usuario_id).filter(Boolean))];
+  if (!ids.length) return new Map();
+  try {
+    const usuarios = await Usuario.findAll({
+      where: { id: ids, organizacao_id },
+      attributes: ["id", "nome"],
+    });
+    return new Map(usuarios.map((u) => [u.id, u.nome]));
+  } catch (e) {
+    console.warn("[orçamentos] não foi possível obter os responsáveis:", e.message);
+    return new Map();
+  }
 }
 
 async function proximoNumero(organizacao_id) {
@@ -356,7 +378,12 @@ exports.listar = async (req, res) => {
       order: [["createdAt", "DESC"]],
     });
     const mapa = await buscarOrdensMapa(orcamentos, req.organizacao_id);
-    return res.json(orcamentos.map((o) => serializar(comOrdemProducao(o, mapa))));
+    const responsaveis = await buscarResponsaveisMapa(orcamentos, req.organizacao_id);
+    return res.json(orcamentos.map((o) => {
+      const dados = comOrdemProducao(o, mapa);
+      dados.responsavel = responsaveis.get(o.usuario_id) || "";
+      return serializar(dados);
+    }));
   } catch (e) {
     console.error("Erro ao listar orçamentos:", e);
     return res.status(500).json({ erro: "Erro ao listar orçamentos" });
@@ -371,7 +398,10 @@ exports.buscarPorId = async (req, res) => {
     });
     if (!orcamento) return res.status(404).json({ erro: "Orçamento não encontrado" });
     const mapa = await buscarOrdensMapa([orcamento], req.organizacao_id);
-    return res.json(serializar(comOrdemProducao(orcamento, mapa)));
+    const responsaveis = await buscarResponsaveisMapa([orcamento], req.organizacao_id);
+    const dados = comOrdemProducao(orcamento, mapa);
+    dados.responsavel = responsaveis.get(orcamento.usuario_id) || "";
+    return res.json(serializar(dados));
   } catch (e) {
     console.error("Erro ao buscar orçamento:", e);
     return res.status(500).json({ erro: "Erro ao buscar orçamento" });

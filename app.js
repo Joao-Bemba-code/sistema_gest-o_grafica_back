@@ -44,6 +44,7 @@ function criarApp(opcoes = {}) {
     app.use("/api/clientes", require("./routers/clientes"));
     app.use("/api/materiais", require("./routers/materiais"));
     app.use("/api/orcamentos", require("./routers/orcamentos"));
+    app.use("/api/propostas", require("./routers/propostas"));
     app.use("/api/producao", require("./routers/producao"));
     app.use("/api/faturacao", require("./routers/faturacao"));
     app.use("/api/categorias", require("./routers/categorias"));
@@ -57,6 +58,8 @@ function criarApp(opcoes = {}) {
     app.use("/api/notificacoes", require("./routers/notificacoes"));
     app.use("/api/contas-bancarias", require("./routers/contasBancarias"));
     app.use("/api/tesouraria", require("./routers/tesouraria"));
+    app.use("/api/caixa", require("./routers/caixa"));
+    app.use("/api/rateios", require("./routers/rateios"));
     app.use("/api/dividas", require("./routers/dividas"));
     app.use("/api/bens", require("./routers/bens"));
     app.use("/api/sinc", require("./routers/sincronizacao"));

@@ -12,18 +12,42 @@ app.use((err, req, res, next) => {
 
 const PORTA = process.env.port || 8000;
 
-(async () => {
+  (async () => {
   const usaMysql = (process.env.Lang || "mysql").toLowerCase() !== "sqlite";
   if (usaMysql) {
     try {
       const { prepararSchemaAntesSync } = require("./migrarMysql");
       await prepararSchemaAntesSync(sequelize);
+      // Limpar registos órfãos antes do sync para evitar falha na criação de FKs
+      try {
+        await sequelize.query(
+          `DELETE FROM orcamento_material
+           WHERE orcamento_item_id IS NOT NULL
+             AND orcamento_item_id NOT IN (SELECT id FROM orcamento_item)`
+        );
+        console.log("Limpeza: orcamento_material órfãos removidos");
+      } catch (e) {
+        console.log("Limpeza de órfãos ignorada:", e.message);
+      }
+      try {
+        await sequelize.query(
+          `DELETE FROM orcamento_servico
+           WHERE orcamento_id IS NOT NULL
+             AND orcamento_id NOT IN (SELECT id FROM orcamento)`
+        );
+      } catch {}
     } catch (e) {
       console.error("Erro na preparação pré-sync:", e.message);
     }
   }
 
-  await sequelize.sync({ alter: true });
+  try {
+    await sequelize.sync({ alter: true });
+  } catch (e) {
+    console.error("Erro no sync({ alter: true }):", e.message);
+    // Tentar novamente sem alterar em caso de conflito de FK
+    await sequelize.sync();
+  }
 
   if (usaMysql) {
     const { aplicarMigracoesMysql } = require("./migrarMysql");
