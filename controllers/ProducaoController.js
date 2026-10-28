@@ -161,7 +161,7 @@ exports.criarOrdem = async (req, res) => {
       usuario_id: req.usuario.id,
       cliente_id: b.cliente_id || null,
       orcamento_id: b.orcamento_id || null,
-      numero: b.numero || `OP-${new Date().getFullYear()}-${Date.now()}`,
+      numero: b.numero || `KOP-${new Date().getFullYear()}-${Date.now()}`,
       produto: b.produto || null,
       quantidade,
       data_entrada: b.dataEntrada || null,

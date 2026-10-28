@@ -29,6 +29,31 @@ async function aplicarMigracoesMysql(sequelize) {
   await adicionar("organizacao", "banco_iban", "VARCHAR(50) NULL");
   await adicionar("organizacao", "banco_conta", "VARCHAR(50) NULL");
 
+  // Pessoa de contacto do cliente (responsável directo pelos assuntos).
+  await adicionar("cliente", "pessoa_contacto", "VARCHAR(150) NULL");
+  await adicionar("cliente", "pessoa_funcao", "VARCHAR(100) NULL");
+  await adicionar("cliente", "pessoa_telefone", "VARCHAR(30) NULL");
+  await adicionar("cliente", "pessoa_email", "VARCHAR(150) NULL");
+
+  // Ficha de registro de clientes (COM-CLI-01): identidade & unidade de negócio.
+  await adicionar("cliente", "tipo_cliente", "VARCHAR(50) NULL");
+  await adicionar("cliente", "nome_comercial", "VARCHAR(200) NULL");
+  await adicionar("cliente", "segmento", "VARCHAR(100) NULL");
+  await adicionar("cliente", "unidade_negocio", "VARCHAR(100) NULL");
+  await adicionar("cliente", "unidades_secundarias", "JSON NULL");
+  // Contactos principais & endereço.
+  await adicionar("cliente", "pais", "VARCHAR(100) NULL");
+  await adicionar("cliente", "provincia", "VARCHAR(100) NULL");
+  await adicionar("cliente", "municipio", "VARCHAR(100) NULL");
+  await adicionar("cliente", "bairro", "VARCHAR(100) NULL");
+  await adicionar("cliente", "rua", "VARCHAR(200) NULL");
+  await adicionar("cliente", "numero_porta", "VARCHAR(20) NULL");
+  // Classificação comercial.
+  await adicionar("cliente", "categoria", "VARCHAR(100) NULL");
+  await adicionar("cliente", "setor_atividade", "VARCHAR(100) NULL");
+  await adicionar("cliente", "fonte_origem", "VARCHAR(100) NULL");
+  await adicionar("cliente", "referencia_interna", "VARCHAR(200) NULL");
+
   // Histórico de mudanças de estado das máquinas (JSON: [{estado,data,motivo}])
   await adicionar("maquina", "historico_estados", "JSON NULL");
 
@@ -107,6 +132,10 @@ async function aplicarMigracoesMysql(sequelize) {
   // Controlo de acesso: perfil (papel) e permissões por utilizador.
   await adicionar("usuario", "perfil", "VARCHAR(50) NULL");
   await adicionar("usuario", "permissoes", "JSON NULL");
+
+  // Revogação de sessões: token_version é incrementado quando a senha, o email
+  // ou as permissões mudam.
+  await adicionar("usuario", "token_version", "INT NOT NULL DEFAULT 0");
 
   // Utilizadores já existentes mantêm acesso total (perfil administrador) para
   // não bloquear ninguém na primeira migração; o admin ajusta depois os perfis.
@@ -260,6 +289,10 @@ async function aplicarMigracoesMysql(sequelize) {
   // Conta bancária associada à fatura (onde o pagamento foi recebido).
   await adicionar("faturacao", "conta_bancaria_id", "INT NULL");
 
+  // 2FA TOTP das contas do painel de suporte (segredo cifrado na aplicação).
+  await adicionar("suporte_usuario", "totp_secret", "TEXT NULL");
+  await adicionar("suporte_usuario", "totp_confirmado", "TINYINT(1) NOT NULL DEFAULT 0");
+
   // A categoria da tesouraria passou a ser texto livre. Converte ENUM para VARCHAR.
   const tesCategoriaRef = await sequelize.query(
     "SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tesouraria_movimento' AND COLUMN_NAME = 'categoria'",
@@ -308,6 +341,49 @@ async function aplicarMigracoesMysql(sequelize) {
     await recodificarMateriaisK(sequelize);
   } catch (e) {
     console.log(`MIGRAÇÃO: recodificação de artigos — ${e.message}`);
+  }
+
+  // Anulação em vez de eliminação (Comercial): clientes, propostas e
+  // orçamentos nunca são apagados — ficam anulados com motivo obrigatório.
+  await adicionar("cliente", "anulado", "TINYINT(1) NOT NULL DEFAULT 0");
+  await adicionar("cliente", "motivo_anulacao", "TEXT NULL");
+  await adicionar("cliente", "anulado_por", "VARCHAR(200) NULL");
+  await adicionar("cliente", "data_anulacao", "DATETIME NULL");
+  await adicionar("proposta", "anulado", "TINYINT(1) NOT NULL DEFAULT 0");
+  await adicionar("proposta", "motivo_anulacao", "TEXT NULL");
+  await adicionar("proposta", "anulado_por", "VARCHAR(200) NULL");
+  await adicionar("proposta", "data_anulacao", "DATETIME NULL");
+  await adicionar("orcamento", "anulado", "TINYINT(1) NOT NULL DEFAULT 0");
+  await adicionar("orcamento", "motivo_anulacao", "TEXT NULL");
+  await adicionar("orcamento", "anulado_por", "VARCHAR(200) NULL");
+  await adicionar("orcamento", "data_anulacao", "DATETIME NULL");
+
+  // Estado 'anulado' no ENUM dos orçamentos.
+  const orcEstRef = await sequelize.query(
+    "SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'orcamento' AND COLUMN_NAME = 'estado'",
+    { type: sequelize.QueryTypes.SELECT }
+  );
+  if (orcEstRef.length && orcEstRef[0].COLUMN_TYPE.includes("ENUM") && !orcEstRef[0].COLUMN_TYPE.includes("anulado")) {
+    try {
+      await sequelize.query("SET SESSION sql_mode = 'NO_ENGINE_SUBSTITUTION'");
+      await sequelize.query(
+        "ALTER TABLE `orcamento` MODIFY `estado` ENUM('pendente','aprovado','cancelado','rejeitado','anulado') NOT NULL DEFAULT 'pendente'"
+      );
+      console.log("MIGRAÇÃO: orcamento.estado inclui 'anulado'");
+    } catch (e) {
+      if (e.code === "WARN_DATA_TRUNCATED" || e.parent?.code === "WARN_DATA_TRUNCATED") {
+        console.log("MIGRAÇÃO: orcamento.estado actualizado");
+      } else throw e;
+    }
+  }
+
+  // Todos os códigos/referências passam a começar com K (inclui registos antigos).
+  // Idempotente: códigos já conformes nunca são alterados.
+  try {
+    const { recodificarCodigosK } = require("./services/recodificarCodigosK");
+    await recodificarCodigosK(sequelize);
+  } catch (e) {
+    console.log(`MIGRAÇÃO: recodificação K dos códigos — ${e.message}`);
   }
 }
 

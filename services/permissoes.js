@@ -56,11 +56,11 @@ const PERFIS = {
     permissoes: {
       producao: { ver: true, criar: true, editar: true, eliminar: false, aprovar: false },
       comercial: { ver: true, criar: false, editar: false, eliminar: false, aprovar: false },
-      maquinas: { ver: false, criar: false, editar: true, eliminar: false, aprovar: false },
+      maquinas: { ver: true, criar: false, editar: true, eliminar: false, aprovar: false },
       faturacao: { ver: false, criar: false, editar: false, eliminar: false, aprovar: false },
       tesouraria: { ver: false, criar: false, editar: false, eliminar: false, aprovar: false },
       dividas: { ver: false, criar: false, editar: false, eliminar: false, aprovar: false },
-      estoque: { ver: false, criar: false, editar: false, eliminar: false, aprovar: false },
+      estoque: { ver: true, criar: false, editar: false, eliminar: false, aprovar: false },
       compras: { ver: true, criar: true, editar: false, eliminar: false, aprovar: false },
       financeiro: { ver: false, criar: false, editar: false, eliminar: false, aprovar: false },
       patrimonio: { ver: true, criar: false, editar: false, eliminar: false, aprovar: false },

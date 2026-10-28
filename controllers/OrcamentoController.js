@@ -4,7 +4,7 @@ const validador = require("../validators/orcamento");
 const estoqueService = require("../services/estoque");
 const notificacoesService = require("../services/notificacoes");
 
-const ESTADOS = ["pendente", "aprovado", "cancelado", "rejeitado"];
+const ESTADOS = ["pendente", "aprovado", "cancelado", "rejeitado", "anulado"];
 
 function includeCompleto() {
   return [
@@ -218,6 +218,10 @@ function serializar(o) {
     condicoesPagamento: o.condicoes_pagamento,
     observacoes: o.observacoes,
     responsavel: o.responsavel || "",
+    anulado: Boolean(o.anulado),
+    motivo_anulacao: o.motivo_anulacao || "",
+    anulado_por: o.anulado_por || "",
+    data_anulacao: o.data_anulacao || null,
     ordem_producao: o.ordem_producao
       ? {
           id: o.ordem_producao.id,
@@ -268,11 +272,11 @@ async function proximoNumero(organizacao_id) {
     let seq = await Sequencia.findOne({ where: { organizacao_id }, transaction: t, lock });
     if (!seq) {
       seq = await Sequencia.create({ organizacao_id, numero: 1 }, { transaction: t });
-      return "ORC-0001";
+      return "KORC-0001";
     }
     const novo = Number(seq.numero || 0) + 1;
     await seq.update({ numero: novo }, { transaction: t });
-    return `ORC-${String(novo).padStart(4, "0")}`;
+    return `KORC-${String(novo).padStart(4, "0")}`;
   });
 }
 
@@ -309,7 +313,7 @@ async function criarOrdemProducaoAuto(orcamento, organizacaoId, usuarioId) {
     usuario_id: usuarioId,
     cliente_id: orcamento.cliente_id || null,
     orcamento_id: orcamento.id,
-    numero: `OP-${new Date().getFullYear()}-${orcamento.id}`,
+    numero: `KOP-${new Date().getFullYear()}-${orcamento.id}`,
     produto,
     quantidade,
     data_entrada: new Date().toISOString().split("T")[0],
@@ -456,6 +460,9 @@ exports.atualizar = async (req, res) => {
     });
     if (!orcamento) return res.status(404).json({ erro: "Orçamento não encontrado" });
     if (req.body.estado && !ESTADOS.includes(req.body.estado)) return res.status(422).json({ erro: "Estado inválido" });
+    if (req.body.estado === "anulado" && orcamento.estado !== "anulado") {
+      return res.status(422).json({ erro: "Para anular um orçamento use a ação Anular, com o motivo" });
+    }
     const dados = normalizarDados(req.body);
     delete dados.numero;
     const estadoAnterior = orcamento.estado;
@@ -523,21 +530,32 @@ exports.enviarProducao = async (req, res) => {
   }
 };
 
-exports.remover = async (req, res) => {
+// Um orçamento nunca é eliminado: é anulado, com motivo obrigatório, e fica
+// no histórico com o estado "anulado".
+exports.anular = async (req, res) => {
   try {
     const orcamento = await Orcamento.findOne({
       where: { id: req.params.id, organizacao_id: req.organizacao_id },
     });
     if (!orcamento) return res.status(404).json({ erro: "Orçamento não encontrado" });
-    const idsItens = (await OrcamentoItem.findAll({ where: { orcamento_id: orcamento.id }, attributes: ["id"] })).map((i) => i.id);
-    if (idsItens.length) await OrcamentoMaterial.update({ deleted: 1, deletedAt: new Date() }, { where: { orcamento_item_id: idsItens } });
-    await OrcamentoItem.update({ deleted: 1, deletedAt: new Date() }, { where: { orcamento_id: orcamento.id } });
-    await OrcamentoServico.update({ deleted: 1, deletedAt: new Date() }, { where: { orcamento_id: orcamento.id } });
-    await orcamento.update({ deleted: 1, deletedAt: new Date() });
-    return res.json({ mensagem: "Orçamento removido com sucesso" });
+    if (orcamento.estado === "anulado") {
+      return res.status(422).json({ erro: "Este orçamento já está anulado" });
+    }
+    const motivo = req.body?.motivo ? String(req.body.motivo).trim() : "";
+    if (!motivo) return res.status(422).json({ erro: "Indique o motivo da anulação" });
+    await orcamento.update({
+      estado: "anulado",
+      anulado: true,
+      motivo_anulacao: motivo,
+      anulado_por: req.usuario?.nome || req.usuario?.email || "",
+      data_anulacao: new Date(),
+    });
+    const completo = await Orcamento.findByPk(orcamento.id, { include: includeCompleto() });
+    const mapa = await buscarOrdensMapa([completo], req.organizacao_id);
+    return res.json(serializar(comOrdemProducao(completo, mapa)));
   } catch (e) {
-    console.error("Erro ao remover orçamento:", e);
-    return res.status(500).json({ erro: "Erro ao remover orçamento" });
+    console.error("Erro ao anular orçamento:", e);
+    return res.status(500).json({ erro: "Erro ao anular orçamento" });
   }
 };
 

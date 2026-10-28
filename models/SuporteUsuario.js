@@ -9,6 +9,9 @@ const SuporteUsuario = sequelize.define("suporte_usuario", {
   email: { type: DataTypes.STRING(100), allowNull: false, unique: { name: "suporte_usuario_email_uk" } },
   senha: { type: DataTypes.STRING(255), allowNull: false },
   ativo: { type: DataTypes.BOOLEAN, defaultValue: true },
+  // 2FA TOTP: o segredo fica cifrado (AES-256-GCM) — ver services/totp.js.
+  totp_secret: { type: DataTypes.TEXT, allowNull: true },
+  totp_confirmado: { type: DataTypes.BOOLEAN, defaultValue: false },
 });
 
 module.exports = SuporteUsuario;

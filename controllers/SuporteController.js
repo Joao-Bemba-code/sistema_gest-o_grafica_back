@@ -2,12 +2,21 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const { Op, fn, col, literal } = require("sequelize");
-const { SuporteUsuario, Organizacao, Usuario, LoginLog } = require("../models");
+const { SuporteUsuario, Organizacao, Usuario, LoginLog, SuporteAuditoria } = require("../models");
 const loginLog = require("../services/loginLog");
 const suporteAuditoria = require("../services/suporteAuditoria");
 const { registarFalha, limparFalhas } = require("../protect/loginLimit");
+const totp = require("../services/totp");
+const { COOKIE_SESSAO } = require("../protect/suporteAuth");
 
-const SEM_SENHA = { exclude: ["senha"] };
+const SEM_SENHA = { exclude: ["senha", "totp_secret"] };
+const COOKIE_OPTS = () => ({
+  httpOnly: true,
+  sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+  secure: process.env.NODE_ENV === "production",
+  maxAge: 8 * 60 * 60 * 1000,
+  path: "/",
+});
 
 const CARACTERES_SENHA = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789!@#$%";
 
@@ -21,7 +30,7 @@ function gerarSenha(tamanho = 12) {
 }
 
 function semSenha(instancia) {
-  const { senha: _, ...dados } = instancia.toJSON();
+  const { senha: _, totp_secret: __, ...dados } = instancia.toJSON();
   return dados;
 }
 
@@ -58,7 +67,7 @@ async function criarUsuarioDeOrg(organizacaoId, dados) {
 
 exports.login = async (req, res) => {
   try {
-    const { email, senha } = req.body;
+    const { email, senha, codigo } = req.body;
     if (!email || !senha) {
       return res.status(422).json({ erro: "Email e senha são obrigatórios" });
     }
@@ -74,8 +83,26 @@ exports.login = async (req, res) => {
         ip: req.ip,
         user_agent: req.headers?.["user-agent"] || null,
       });
+      await suporteAuditoria.registar(req, "suporte.login_falha", { tipo: "suporte_usuario", id: usuario?.id ?? null }, { email });
       return res.status(401).json({ erro: "Credenciais inválidas" });
     }
+
+    // 2FA: contas com TOTP confirmado exigem código de 6 dígitos válido.
+    if (usuario.totp_confirmado && usuario.totp_secret) {
+      const segredo = totp.decifrarSegredo(usuario.totp_secret);
+      if (!segredo || !totp.verificarCodigo(segredo, codigo)) {
+        registarFalha(req);
+        await loginLog.registrar({
+          email,
+          sucesso: false,
+          ip: req.ip,
+          user_agent: req.headers?.["user-agent"] || null,
+        });
+        await suporteAuditoria.registar(req, "suporte.login_falha_2fa", { tipo: "suporte_usuario", id: usuario.id }, { email });
+        return res.status(401).json({ erro: "Código de verificação inválido. Confira o código da app de autenticação.", precisa_totp: true });
+      }
+    }
+
     limparFalhas(req);
     await loginLog.registrar({
       email,
@@ -83,12 +110,73 @@ exports.login = async (req, res) => {
       ip: req.ip,
       user_agent: req.headers?.["user-agent"] || null,
     });
+    await suporteAuditoria.registar(req, "suporte.login", { tipo: "suporte_usuario", id: usuario.id }, { nome: usuario.nome });
     const token = jwt.sign({ id: usuario.id, tipo: "suporte" }, process.env.SECRET_SUPORTE, {
       expiresIn: "8h",
     });
+    // Sessão principal via cookie HttpOnly; o token no corpo mantém-se apenas
+    // como reserva para ambientes locais onde o browser não envia o cookie.
+    res.cookie(COOKIE_SESSAO, token, COOKIE_OPTS());
     return res.json({ token, usuario: semSenha(usuario) });
   } catch (e) {
     console.error("Erro no login de suporte:", e);
+    return res.status(500).json({ erro: "Erro interno no servidor" });
+  }
+};
+
+exports.logout = (req, res) => {
+  res.clearCookie(COOKIE_SESSAO, { ...COOKIE_OPTS(), maxAge: undefined });
+  return res.json({ mensagem: "Sessão terminada" });
+};
+
+exports.totpEstado = (req, res) => {
+  return res.json({ activo: !!req.suporte.totp_confirmado });
+};
+
+exports.totpGerar = async (req, res) => {
+  try {
+    const segredo = totp.gerarSegredo();
+    await req.suporte.update({ totp_secret: totp.cifrarSegredo(segredo), totp_confirmado: false });
+    await suporteAuditoria.registar(req, "suporte.2fa_gerar", { tipo: "suporte_usuario", id: req.suporte.id }, { estado: "por_confirmar" });
+    const nome = encodeURIComponent(`KAMGEST Suporte (${req.suporte.email})`);
+    const uri = `otpauth://totp/${nome}?secret=${segredo}&issuer=KAMGEST`;
+    return res.json({ segredo, uri });
+  } catch (e) {
+    console.error("Erro ao gerar 2FA:", e);
+    return res.status(500).json({ erro: "Erro interno no servidor" });
+  }
+};
+
+exports.totpConfirmar = async (req, res) => {
+  try {
+    const { codigo } = req.body;
+    const segredo = totp.decifrarSegredo(req.suporte.totp_secret);
+    if (!segredo) {
+      return res.status(400).json({ erro: "Gere primeiro um código QR na opção «Activar»." });
+    }
+    if (!totp.verificarCodigo(segredo, codigo)) {
+      return res.status(400).json({ erro: "Código inválido. Confirme que o relógio do telefone está certo e tente de novo." });
+    }
+    await req.suporte.update({ totp_confirmado: true });
+    await suporteAuditoria.registar(req, "suporte.2fa_activar", { tipo: "suporte_usuario", id: req.suporte.id }, { activo: true });
+    return res.json({ mensagem: "Verificação em dois passos activada.", activo: true });
+  } catch (e) {
+    console.error("Erro ao confirmar 2FA:", e);
+    return res.status(500).json({ erro: "Erro interno no servidor" });
+  }
+};
+
+exports.totpDesactivar = async (req, res) => {
+  try {
+    const { senha } = req.body;
+    if (!senha || !(await bcrypt.compare(senha, req.suporte.senha))) {
+      return res.status(401).json({ erro: "Senha incorrecta. Confirme a senha para desactivar o 2FA." });
+    }
+    await req.suporte.update({ totp_secret: null, totp_confirmado: false });
+    await suporteAuditoria.registar(req, "suporte.2fa_desactivar", { tipo: "suporte_usuario", id: req.suporte.id }, { activo: false });
+    return res.json({ mensagem: "Verificação em dois passos desactivada.", activo: false });
+  } catch (e) {
+    console.error("Erro ao desactivar 2FA:", e);
     return res.status(500).json({ erro: "Erro interno no servidor" });
   }
 };
@@ -364,6 +452,50 @@ exports.atualizarUsuario = async (req, res) => {
   } catch (e) {
     console.error("Erro ao atualizar utilizador (suporte):", e);
     return res.status(500).json({ erro: "Erro ao atualizar utilizador" });
+  }
+};
+
+exports.listarAuditoria = async (req, res) => {
+  try {
+    const { pagina, limite, offset } = paginacao(req.query);
+    const where = {};
+    if (req.query.acao) where.acao = String(req.query.acao).slice(0, 50);
+    const busca = String(req.query.busca || "").trim();
+    if (busca) {
+      where[Op.or] = [
+        { acao: { [Op.like]: `%${busca}%` } },
+        { detalhe: { [Op.like]: `%${busca}%` } },
+      ];
+    }
+    const total = await SuporteAuditoria.count({ where });
+    const logs = await SuporteAuditoria.findAll({
+      where,
+      include: [{ model: SuporteUsuario, attributes: ["id", "nome", "email"] }],
+      order: [["id", "DESC"]],
+      offset,
+      limit: limite,
+    });
+    return res.json({
+      itens: logs.map((l) => ({
+        id: l.id,
+        acao: l.acao,
+        alvo_tipo: l.alvo_tipo,
+        alvo_id: l.alvo_id,
+        detalhe: l.detalhe,
+        ip: l.ip,
+        criado_em: l.createdAt ?? null,
+        suporte: l.SuporteUsuario
+          ? { id: l.SuporteUsuario.id, nome: l.SuporteUsuario.nome, email: l.SuporteUsuario.email }
+          : null,
+      })),
+      total,
+      pagina,
+      limite,
+      totalPaginas: Math.max(1, Math.ceil(total / limite)),
+    });
+  } catch (e) {
+    console.error("Erro ao listar auditoria (suporte):", e);
+    return res.status(500).json({ erro: "Erro ao listar auditoria" });
   }
 };
 

@@ -7,26 +7,27 @@ function assinarJWS(payload, chavePrivada) {
 }
 
 function assinarSoftware(detalhe, cfg) {
-  return assinarJWS(detalhe, cfg.softwareKey);
+  return assinarJWS(detalhe, (cfg || configAGT()).softwareKey);
 }
 
 function assinarDocumento(payload, cfg) {
-  return assinarJWS(payload, cfg.taxpayerKey);
+  return assinarJWS(payload, (cfg || configAGT()).taxpayerKey);
 }
 
 function authHeader(cfg) {
-  return `Basic ${Buffer.from(`${cfg.username}:${cfg.password}`).toString("base64")}`;
+  const c = cfg || configAGT();
+  return `Basic ${Buffer.from(`${c.username}:${c.password}`).toString("base64")}`;
 }
 
-async function chamarAGT(caminho, corpo) {
-  const cfg = configAGT();
+async function chamarAGT(caminho, corpo, cfg) {
+  const c = cfg || configAGT();
   const controlador = new AbortController();
-  const timer = setTimeout(() => controlador.abort(), cfg.timeoutMs);
+  const timer = setTimeout(() => controlador.abort(), c.timeoutMs);
   try {
-    const resposta = await fetch(`${cfg.baseUrl}${caminho}`, {
+    const resposta = await fetch(`${c.baseUrl}${caminho}`, {
       method: "POST",
       headers: {
-        Authorization: authHeader(cfg),
+        Authorization: authHeader(c),
         "Content-Type": "application/json",
         Accept: "application/json",
       },
@@ -46,12 +47,12 @@ async function chamarAGT(caminho, corpo) {
   }
 }
 
-function baseComum(nif) {
-  const cfg = configAGT();
+function baseComum(nif, cfg) {
+  const c = cfg || configAGT();
   const detalhe = {
-    productId: cfg.productId,
-    productVersion: cfg.productVersion,
-    softwareValidationNumber: cfg.softwareValidationNumber,
+    productId: c.productId,
+    productVersion: c.productVersion,
+    softwareValidationNumber: c.softwareValidationNumber,
   };
   return {
     schemaVersion: "2.0",
@@ -60,60 +61,60 @@ function baseComum(nif) {
     submissionTimeStamp: new Date().toISOString(),
     softwareInfo: {
       softwareInfoDetail: detalhe,
-      jwsSoftwareSignature: assinarSoftware(detalhe, cfg),
+      jwsSoftwareSignature: assinarSoftware(detalhe, c),
     },
   };
 }
 
-async function solicitarSerie({ nif, establishment, seriesYear, documentType, contingencyIndicator = "N" }) {
-  const cfg = configAGT();
+async function solicitarSerie({ nif, establishment, seriesYear, documentType, contingencyIndicator = "N" }, cfg) {
+  const c = cfg || configAGT();
   const corpo = {
-    ...baseComum(nif),
+    ...baseComum(nif, c),
     seriesYear: String(seriesYear),
     documentType,
-    establishmentNumber: establishment || cfg.establishment,
+    establishmentNumber: establishment || c.establishment,
     seriesContingencyIndicator: contingencyIndicator,
     jwsSignature: assinarDocumento(
       {
         taxRegistrationNumber: nif,
-        establishmentNumber: establishment || cfg.establishment,
+        establishmentNumber: establishment || c.establishment,
         seriesYear: String(seriesYear),
         documentType,
       },
-      cfg
+      c
     ),
   };
-  return chamarAGT(cfg.caminhos.solicitarSerie, corpo);
+  return chamarAGT(c.caminhos.solicitarSerie, corpo, c);
 }
 
-async function listarSeries({ nif, criterios = {} }) {
-  const cfg = configAGT();
+async function listarSeries({ nif, criterios = {} }, cfg) {
+  const c = cfg || configAGT();
   const corpo = {
-    ...baseComum(nif),
-    jwsSignature: assinarDocumento({ taxRegistrationNumber: nif }, cfg),
+    ...baseComum(nif, c),
+    jwsSignature: assinarDocumento({ taxRegistrationNumber: nif }, c),
     ...criterios,
   };
-  return chamarAGT(cfg.caminhos.listarSeries, corpo);
+  return chamarAGT(c.caminhos.listarSeries, corpo, c);
 }
 
-async function registarFacturas({ nif, documentos }) {
-  const cfg = configAGT();
+async function registarFacturas({ nif, documentos }, cfg) {
+  const c = cfg || configAGT();
   const corpo = {
-    ...baseComum(nif),
+    ...baseComum(nif, c),
     numberOfEntries: documentos.length,
     documents: documentos,
   };
-  return chamarAGT(cfg.caminhos.registarFactura, corpo);
+  return chamarAGT(c.caminhos.registarFactura, corpo, c);
 }
 
-async function obterEstado({ nif, requestID }) {
-  const cfg = configAGT();
+async function obterEstado({ nif, requestID }, cfg) {
+  const c = cfg || configAGT();
   const corpo = {
-    ...baseComum(nif),
+    ...baseComum(nif, c),
     requestID,
-    jwsSignature: assinarDocumento({ taxRegistrationNumber: nif, requestID }, cfg),
+    jwsSignature: assinarDocumento({ taxRegistrationNumber: nif, requestID }, c),
   };
-  return chamarAGT(cfg.caminhos.obterEstado, corpo);
+  return chamarAGT(c.caminhos.obterEstado, corpo, c);
 }
 
 module.exports = {

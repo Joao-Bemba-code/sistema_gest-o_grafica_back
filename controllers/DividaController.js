@@ -121,8 +121,10 @@ exports.listar = async (req, res) => {
 
 exports.buscar = async (req, res) => {
   try {
-    const divida = await Divida.findByPk(req.params.id, {
-      where: { organizacao_id: req.organizacao_id },
+    // findByPk substitui o `where` pela chave primária no Sequelize, pelo que
+    // o filtro de organização era ignorado. findOne garante o isolamento.
+    const divida = await Divida.findOne({
+      where: { id: req.params.id, organizacao_id: req.organizacao_id },
       include: INCLUDES,
     });
     if (!divida) return res.status(404).json({ erro: "Dívida não encontrada" });

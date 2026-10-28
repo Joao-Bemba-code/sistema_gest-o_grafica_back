@@ -7,10 +7,22 @@ function sanitizeValue(val) {
   return val;
 }
 
+// Campos que NÃO podem ser passados pelo xss(): senhas (seriam alteradas e a
+// autenticação falhava) e o template de contrato, que é HTML legítimo.
+const CAMPOS_PRESERVADOS = new Set([
+  "senha",
+  "password",
+  "senha_atual",
+  "nova_senha",
+  "currentPassword",
+  "newPassword",
+  "template_contrato",
+]);
+
 function sanitizeObject(obj) {
   const clean = {};
   for (const [k, v] of Object.entries(obj)) {
-    clean[k] = sanitizeValue(v);
+    clean[k] = CAMPOS_PRESERVADOS.has(k) ? v : sanitizeValue(v);
   }
   return clean;
 }

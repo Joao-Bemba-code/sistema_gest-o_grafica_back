@@ -1,4 +1,7 @@
-const { Organizacao, Sistema, Seguranca, Usuario } = require("../models");
+const { Organizacao, Sistema, Seguranca, Usuario, AgtConfiguracao } = require("../models");
+const auditoria = require("../services/auditoria");
+const { obterConfigAGT, agtPronto, configSoftwareAGT } = require("../services/agtConfig");
+const { cifrar } = require("../services/agtSegredos");
 
 exports.buscarOrganizacao = async (req, res) => {
   try {
@@ -107,6 +110,81 @@ exports.buscarUtilizadorAtual = async (req, res) => {
   }
 };
 
+exports.buscarAgt = async (req, res) => {
+  try {
+    const cfg = await obterConfigAGT(req.organizacao_id);
+    const linha = await AgtConfiguracao.findOne({ where: { organizacao_id: req.organizacao_id } });
+    const software = configSoftwareAGT();
+    return res.json({
+      definida: !!linha,
+      ativo: cfg.ativo,
+      ambiente: cfg.ambiente,
+      baseUrl: cfg.baseUrl,
+      username: cfg.username,
+      nif: cfg.nif,
+      establishment: cfg.establishment,
+      eacCode: cfg.eacCode,
+      iva: cfg.ivaDefault,
+      pronto: agtPronto(cfg),
+      // Nunca devolver os segredos: só se estão definidos ou não.
+      segredos: {
+        senhaDefinida: !!cfg.password,
+        taxpayerKeyDefinida: !!cfg.taxpayerKey,
+      },
+      software: {
+        productId: software.productId,
+        productVersion: software.productVersion,
+        softwareValidationNumber: software.softwareValidationNumber,
+        softwareKeyDefinida: !!software.softwareKey,
+      },
+    });
+  } catch (e) {
+    console.error("Erro ao buscar configuração AGT:", e);
+    return res.status(500).json({ erro: "Erro ao buscar configuração AGT" });
+  }
+};
+
+exports.guardarAgt = async (req, res) => {
+  try {
+    const b = req.body || {};
+    let linha = await AgtConfiguracao.findOne({ where: { organizacao_id: req.organizacao_id } });
+    const dados = {};
+    if (b.ativo !== undefined) dados.ativo = !!b.ativo;
+    if (b.ambiente !== undefined) {
+      const amb = String(b.ambiente).toLowerCase();
+      if (!["homologacao", "producao"].includes(amb)) {
+        return res.status(422).json({ erro: "Ambiente inválido (use homologacao ou producao)" });
+      }
+      dados.ambiente = amb;
+    }
+    if (b.username !== undefined) dados.username = String(b.username || "").trim().slice(0, 120);
+    if (b.senha !== undefined && b.senha !== "") dados.senha_cifrada = cifrar(b.senha);
+    if (b.nif !== undefined) dados.nif = String(b.nif || "").trim().slice(0, 30);
+    if (b.establishment !== undefined) dados.establishment = String(b.establishment || "SEDE").slice(0, 200);
+    if (b.eac_code !== undefined) dados.eac_code = String(b.eac_code || "").trim().slice(0, 30);
+    if (b.taxpayer_key !== undefined && b.taxpayer_key !== "") dados.taxpayer_key_cifrada = cifrar(b.taxpayer_key);
+    if (b.iva !== undefined) dados.iva_default = Number(b.iva) || 0;
+
+    if (linha) {
+      await linha.update(dados);
+    } else {
+      linha = await AgtConfiguracao.create({ organizacao_id: req.organizacao_id, ...dados });
+    }
+    auditoria.registrar({
+      req,
+      acao: "configuracao.agt",
+      alvoTipo: "organizacao",
+      alvoId: req.organizacao_id,
+      detalhe: { campos: Object.keys(dados).map((c) => (c.endsWith("_cifrada") ? "segredo" : c)) },
+    });
+    const cfg = await obterConfigAGT(req.organizacao_id);
+    return res.json({ mensagem: "Configuração AGT guardada", definida: true, pronto: agtPronto(cfg) });
+  } catch (e) {
+    console.error("Erro ao guardar configuração AGT:", e);
+    return res.status(500).json({ erro: "Erro ao guardar configuração AGT" });
+  }
+};
+
 exports.alterarEmail = async (req, res) => {
   try {
     const { novo_email, senha_atual } = req.body;
@@ -115,7 +193,21 @@ exports.alterarEmail = async (req, res) => {
     if (!user) return res.status(404).json({ erro: "Utilizador não encontrado" });
     const valida = await bcrypt.compare(senha_atual, user.senha);
     if (!valida) return res.status(400).json({ erro: "Senha atual incorreta" });
-    await user.update({ email: novo_email });
+    const email = String(novo_email || "").trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(422).json({ erro: "Email inválido" });
+    }
+    await user.update({
+      email,
+      token_version: Number(user.token_version || 0) + 1,
+    });
+    auditoria.registrar({
+      req,
+      acao: "configuracao.alterar_email",
+      alvoTipo: "usuario",
+      alvoId: user.id,
+      detalhe: { novo_email: email },
+    });
     return res.json({ mensagem: "Email alterado com sucesso" });
   } catch (e) {
     return res.status(500).json({ erro: "Erro ao alterar email" });
@@ -130,8 +222,20 @@ exports.alterarSenha = async (req, res) => {
     if (!user) return res.status(404).json({ erro: "Utilizador não encontrado" });
     const valida = await bcrypt.compare(senha_atual, user.senha);
     if (!valida) return res.status(400).json({ erro: "Senha atual incorreta" });
+    if (!nova_senha || String(nova_senha).length < 8) {
+      return res.status(422).json({ erro: "A nova senha deve ter pelo menos 8 caracteres" });
+    }
     const hash = await bcrypt.hash(nova_senha, 10);
-    await user.update({ senha: hash });
+    await user.update({
+      senha: hash,
+      token_version: Number(user.token_version || 0) + 1,
+    });
+    auditoria.registrar({
+      req,
+      acao: "configuracao.alterar_senha",
+      alvoTipo: "usuario",
+      alvoId: user.id,
+    });
     return res.json({ mensagem: "Senha alterada com sucesso" });
   } catch (e) {
     return res.status(500).json({ erro: "Erro ao alterar senha" });

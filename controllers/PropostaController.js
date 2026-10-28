@@ -7,7 +7,7 @@ const UNIDADES = {
   "UN-03": { sigla: "SD", rotulo: "Solução Digital" },
 };
 
-const ESTADOS = ["rascunho", "enviada", "recebida", "avaliada", "aprovada", "rejeitada"];
+const ESTADOS = ["rascunho", "enviada", "recebida", "avaliada", "aprovada", "rejeitada", "anulada"];
 
 // Passos permitidos do ciclo da proposta.
 const TRANSICOES = {
@@ -89,6 +89,10 @@ function serializar(p, eventos) {
       ? { id: dados.orcamento.id, numero: dados.orcamento.numero, estado: dados.orcamento.estado }
       : null,
     responsavel: dados.usuario?.nome || "",
+    anulado: Boolean(dados.anulado),
+    motivo_anulacao: dados.motivo_anulacao || "",
+    anulado_por: dados.anulado_por || "",
+    data_anulacao: dados.data_anulacao || null,
     criada_em: dados.createdAt || null,
     eventos: eventosOrdenados.map((e) => ({
       id: e.id,
@@ -103,7 +107,7 @@ function serializar(p, eventos) {
 async function proximoNumero(organizacao_id, unidade) {
   const ano = new Date().getFullYear();
   const sigla = UNIDADES[unidade]?.sigla || "AG";
-  const prefixo = `PROP-${ano}-${sigla}-`;
+  const prefixo = `KPROP-${ano}-${sigla}-`;
   return sequelize.transaction(async (t) => {
     const lock = sequelize.getDialect() === "mysql" ? Transaction.LOCK.UPDATE : undefined;
     // Inclui propostas eliminadas para nunca reutilizar um número.
@@ -328,20 +332,33 @@ exports.vincularOrcamento = async (req, res) => {
   }
 };
 
-exports.remover = async (req, res) => {
+// Uma proposta nunca é eliminada: é anulada, com motivo obrigatório, e fica
+// no histórico com o estado "anulada".
+exports.anular = async (req, res) => {
   try {
     const proposta = await Proposta.findOne({
       where: { id: req.params.id, organizacao_id: req.organizacao_id },
     });
     if (!proposta) return res.status(404).json({ erro: "Proposta não encontrada" });
-    if (proposta.estado !== "rascunho") {
-      return res.status(422).json({ erro: "Só é possível eliminar propostas em rascunho" });
+    if (proposta.estado === "anulada") {
+      return res.status(422).json({ erro: "Esta proposta já está anulada" });
     }
-    await proposta.update({ deleted: true, deletedAt: new Date() });
-    return res.json({ ok: true });
+    const motivo = req.body?.motivo ? String(req.body.motivo).trim() : "";
+    if (!motivo) return res.status(422).json({ erro: "Indique o motivo da anulação" });
+    await proposta.update({
+      estado: "anulada",
+      anulado: true,
+      motivo_anulacao: motivo,
+      anulado_por: req.usuario?.nome || req.usuario?.email || "",
+      data_anulacao: new Date(),
+    });
+    await registarEvento(proposta.id, "anulada", req.usuario.id, `Proposta anulada — ${motivo}`);
+
+    const completa = await carregarCompleta(proposta.id, req.organizacao_id);
+    return res.json(serializar(completa));
   } catch (e) {
-    console.error("Erro ao eliminar proposta:", e);
-    return res.status(500).json({ erro: "Erro ao eliminar proposta" });
+    console.error("Erro ao anular proposta:", e);
+    return res.status(500).json({ erro: "Erro ao anular proposta" });
   }
 };
 

@@ -156,6 +156,43 @@ const TABELAS_SINC = {
   pedido_item: "PedidoItem",
 };
 
+// Tabelas filhas não têm organizacao_id. O acesso é validado pelo pai, para
+// que um id de outra empresa nunca possa ser lido nem escrito pela sincronização.
+const TABELAS_FILHAS = {
+  orcamento_item: { tipo: "orcamento", fk: "orcamento_id" },
+  orcamento_servico: { tipo: "orcamento", fk: "orcamento_id" },
+  orcamento_material: { tipo: "orcamento_item", fk: "orcamento_item_id" },
+  pedido_item: { tipo: "pedido", fk: "pedido_id" },
+};
+
+async function paiPertenceAOrganizacao(tabela, registo, orgId, usarIdDoRegisto = false) {
+  const cfg = TABELAS_FILHAS[tabela];
+  if (!cfg) return true;
+  if (!registo) return false;
+  if (tabela === "orcamento_material") {
+    // No insert o material ainda não existe: validamos o orçamento_item pai.
+    // No update validamos o material existente (pelo seu id).
+    const sql = usarIdDoRegisto
+      ? `SELECT 1 FROM orcamento_material m
+           JOIN orcamento_item oi ON oi.id = m.orcamento_item_id
+           JOIN orcamento o ON o.id = oi.orcamento_id
+          WHERE m.id = ? AND o.organizacao_id = ? LIMIT 1`
+      : `SELECT 1 FROM orcamento_item oi
+           JOIN orcamento o ON o.id = oi.orcamento_id
+          WHERE oi.id = ? AND o.organizacao_id = ? LIMIT 1`;
+    const valor = usarIdDoRegisto ? registo.id : registo.orcamento_item_id;
+    if (valor == null) return false;
+    const [linhas] = await sequelize.query(sql, { replacements: [valor, orgId] });
+    return linhas.length > 0;
+  }
+  if (registo[cfg.fk] == null) return false;
+  const [linhas] = await sequelize.query(
+    `SELECT 1 FROM \`${cfg.tipo}\` p WHERE p.id = ? AND p.organizacao_id = ? LIMIT 1`,
+    { replacements: [registo[cfg.fk], orgId] }
+  );
+  return linhas.length > 0;
+}
+
 function colunasReais(Model) {
   return Object.keys(Model.rawAttributes).filter(
     (a) => !["id", "createdAt", "updatedAt", "is_dirty"].includes(a)
@@ -190,8 +227,28 @@ async function upsertReal(tabela, orgId, registos) {
     if (temOrg) valores.organizacao_id = orgId;
     valores.updatedAt = new Date(novoT || Date.now());
 
-    const atual = await Model.unscoped().findByPk(reg.id, { raw: true });
+    // O registo recebido tem de pertencer à empresa autenticada. Nas tabelas
+    // filhas a verificação é feita pelo orçamento/pedido pai.
+    if (!(await paiPertenceAOrganizacao(tabela, reg, orgId))) continue;
+
+    // Sempre com filtro de organização. Um findByPk simples permite que a
+    // empresa A atualize (e transfira para si) um registo da empresa B.
+    const atual = temOrg
+      ? await Model.unscoped().findOne({
+          where: { id: reg.id, organizacao_id: orgId },
+          raw: true,
+        })
+      : await Model.unscoped().findByPk(reg.id, { raw: true });
+
     if (!atual) {
+      // Um id já existente noutra empresa nunca pode ser reutilizado.
+      if (temOrg) {
+        const colisao = await Model.unscoped().findByPk(reg.id, {
+          attributes: ["id"],
+          raw: true,
+        });
+        if (colisao) continue;
+      }
       valores.id = reg.id;
       valores.createdAt = reg.createdAt ? new Date(Date.parse(reg.createdAt)) : new Date();
       const chaves = Object.keys(valores);
@@ -201,6 +258,8 @@ async function upsertReal(tabela, orgId, registos) {
       );
       n++;
     } else {
+      // O registo existente também tem de ter o pai na mesma empresa.
+      if (!(await paiPertenceAOrganizacao(tabela, atual, orgId, true))) continue;
       const atualT = Date.parse(atual.updatedAt) || 0;
       if (!novoT || novoT <= atualT) continue;
       const sets = [];
@@ -214,8 +273,13 @@ async function upsertReal(tabela, orgId, registos) {
       sets.push("`updatedAt` = ?");
       params.push(valores.updatedAt);
       params.push(reg.id);
+      let where = "id = ?";
+      if (temOrg) {
+        where += " AND `organizacao_id` = ?";
+        params.push(orgId);
+      }
       await sequelize.query(
-        `UPDATE \`${Model.tableName}\` SET ${sets.join(", ")} WHERE id = ?`,
+        `UPDATE \`${Model.tableName}\` SET ${sets.join(", ")} WHERE ${where}`,
         { replacements: params }
       );
       n++;
@@ -229,6 +293,27 @@ async function alteracoesReal(tabela, orgId, since) {
   if (!Model) throw new Error("Tabela não suportada: " + tabela);
   const temOrg = colunasReais(Model).includes("organizacao_id");
   const desde = new Date(since || "1970-01-01T00:00:00.000Z");
+
+  // Tabelas filhas: só devolve linhas cujo pai pertence à organização.
+  if (!temOrg && TABELAS_FILHAS[tabela]) {
+    let sql;
+    if (tabela === "orcamento_material") {
+      sql = `SELECT m.* FROM orcamento_material m
+               JOIN orcamento_item oi ON oi.id = m.orcamento_item_id
+               JOIN orcamento o ON o.id = oi.orcamento_id
+              WHERE o.organizacao_id = ? AND m.updatedAt > ?
+              ORDER BY m.updatedAt ASC`;
+    } else {
+      const cfg = TABELAS_FILHAS[tabela];
+      sql = `SELECT f.* FROM \`${Model.tableName}\` f
+               JOIN \`${cfg.tipo}\` p ON p.id = f.\`${cfg.fk}\`
+              WHERE p.organizacao_id = ? AND f.updatedAt > ?
+              ORDER BY f.updatedAt ASC`;
+    }
+    const [filhas] = await sequelize.query(sql, { replacements: [orgId, desde] });
+    return filhas;
+  }
+
   let sql = `SELECT * FROM \`${Model.tableName}\``;
   const params = [];
   const onde = [];
@@ -236,7 +321,6 @@ async function alteracoesReal(tabela, orgId, since) {
     onde.push("`organizacao_id` = ?");
     params.push(orgId);
   }
-  onde.push("(`deleted` = 0 OR `deleted` IS NULL OR `deleted` = 1)");
   onde.push("`updatedAt` > ?");
   params.push(desde);
   sql += " WHERE " + onde.join(" AND ") + " ORDER BY `updatedAt` ASC";

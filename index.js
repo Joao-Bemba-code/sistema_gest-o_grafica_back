@@ -41,10 +41,18 @@ const PORTA = process.env.port || 8000;
     }
   }
 
+  // `alter: true` em cada arranque pode alterar ou apagar colunas em produção.
+  // Fica ligado apenas em desenvolvimento; em produção usa-se sync() normal e
+  // as migrações explícitas de migrarMysql.js. Pode ser forçado com
+  // DB_SYNC_ALTER=true (apenas para uma migração pontual e controlada).
+  const syncAlter =
+    process.env.DB_SYNC_ALTER === "true" ||
+    (process.env.DB_SYNC_ALTER !== "false" && process.env.NODE_ENV !== "production");
   try {
-    await sequelize.sync({ alter: true });
+    await sequelize.sync(syncAlter ? { alter: true } : {});
+    console.log(`Base de dados sincronizada (alter=${syncAlter})`);
   } catch (e) {
-    console.error("Erro no sync({ alter: true }):", e.message);
+    console.error("Erro no sync da base de dados:", e.message);
     // Tentar novamente sem alterar em caso de conflito de FK
     await sequelize.sync();
   }

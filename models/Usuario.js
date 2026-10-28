@@ -7,6 +7,7 @@ const Usuario = sequelize.define("usuario", {
   nome: { type: DataTypes.STRING(150), allowNull: false },
   email: { type: DataTypes.STRING(100), allowNull: false, unique: { name: "usuario_email_uk" } },
   senha: { type: DataTypes.STRING(255), allowNull: false },
+  token_version: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
   funcao: { type: DataTypes.STRING(50), defaultValue: "operador" },
   perfil: { type: DataTypes.STRING(50), defaultValue: "producao" },
   permissoes: { type: DataTypes.JSON, defaultValue: null },

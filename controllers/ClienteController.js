@@ -1,7 +1,28 @@
-const { Cliente } = require("../models");
+const { Cliente, ClienteDocumento } = require("../models");
+
+// Tipo devolvido ao browser derivado da extensão guardada, nunca do mimetype
+// enviado pelo cliente (que permitia servir HTML como se fosse PDF).
+const MIME_DOCUMENTO = {
+  ".pdf": "application/pdf",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+};
+
+function mimeDoDocumento(nome) {
+  const ext = String(nome || "").toLowerCase().match(/\.[a-z0-9]+$/)?.[0] || "";
+  return MIME_DOCUMENTO[ext] || "application/octet-stream";
+}
+
+function serializarDocumento(doc) {
+  const obj = doc.toJSON ? doc.toJSON() : doc;
+  delete obj.conteudo;
+  return obj;
+}
 
 function gerarCodigo(tipo, id) {
-  const prefixo = tipo === "fornecedor" ? "FOR" : "CLI";
+  const prefixo = tipo === "fornecedor" ? "KFOR" : "KCLI";
   return `${prefixo}-${String(id).padStart(4, "0")}`;
 }
 
@@ -109,15 +130,128 @@ exports.atualizar = async (req, res) => {
   }
 };
 
-exports.remover = async (req, res) => {
+// Um cliente nunca é eliminado: é anulado, com motivo obrigatório, e fica
+// no histórico marcado como anulado.
+exports.anular = async (req, res) => {
   try {
     const cliente = await Cliente.findOne({
       where: { id: req.params.id, organizacao_id: req.organizacao_id },
     });
     if (!cliente) return res.status(404).json({ erro: "Cliente não encontrado" });
-    await cliente.update({ deleted: 1, deletedAt: new Date() });
-    return res.json({ mensagem: "Cliente removido com sucesso" });
+    const motivo = req.body?.motivo ? String(req.body.motivo).trim() : "";
+    if (!motivo) return res.status(400).json({ erro: "Indique o motivo da anulação" });
+    if (cliente.anulado) return res.status(400).json({ erro: "Este cliente já está anulado" });
+    await cliente.update({
+      anulado: true,
+      motivo_anulacao: motivo,
+      anulado_por: req.usuario?.nome || req.usuario?.email || "",
+      data_anulacao: new Date(),
+    });
+    return res.json(serializar(cliente));
   } catch (e) {
-    return res.status(500).json({ erro: "Erro ao remover cliente" });
+    return res.status(500).json({ erro: "Erro ao anular cliente" });
+  }
+};
+
+// Procura um documento garantindo que o cliente pertence à organização.
+async function documentoDaOrganizacao(docId, organizacaoId) {
+  const doc = await ClienteDocumento.findOne({
+    where: { id: docId, organizacao_id: organizacaoId },
+  });
+  if (!doc) return null;
+  const cliente = await Cliente.findOne({
+    where: { id: doc.cliente_id, organizacao_id: organizacaoId },
+  });
+  return cliente ? doc : null;
+}
+
+exports.listarDocumentos = async (req, res) => {
+  try {
+    const cliente = await Cliente.findOne({
+      where: { id: req.params.id, organizacao_id: req.organizacao_id },
+    });
+    if (!cliente) return res.status(404).json({ erro: "Cliente não encontrado" });
+    const documentos = await ClienteDocumento.findAll({
+      where: { cliente_id: cliente.id, organizacao_id: req.organizacao_id },
+      attributes: { exclude: ["conteudo"] },
+      order: [["id", "DESC"]],
+    });
+    return res.json(documentos.map(serializarDocumento));
+  } catch (e) {
+    console.error("Erro ao listar documentos do cliente:", e);
+    return res.status(500).json({ erro: "Erro ao listar documentos" });
+  }
+};
+
+exports.anexarDocumentos = async (req, res) => {
+  try {
+    const cliente = await Cliente.findOne({
+      where: { id: req.params.id, organizacao_id: req.organizacao_id },
+    });
+    if (!cliente) return res.status(404).json({ erro: "Cliente não encontrado" });
+
+    const ficheiros = req.files || [];
+    if (!ficheiros.length) return res.status(400).json({ erro: "Nenhum ficheiro recebido" });
+
+    const autor = req.usuario?.nome || req.usuario?.email || "";
+    const criados = [];
+    for (const f of ficheiros) {
+      criados.push(await ClienteDocumento.create({
+        organizacao_id: req.organizacao_id,
+        cliente_id: cliente.id,
+        nome_original: f.originalname || "documento",
+        mime: f.mimetype || "",
+        tamanho: f.size || 0,
+        conteudo: f.buffer || null,
+        anexado_por: autor,
+      }));
+    }
+    return res.status(201).json(criados.map(serializarDocumento));
+  } catch (e) {
+    console.error("Erro ao anexar documentos do cliente:", e);
+    return res.status(500).json({ erro: "Erro ao anexar documentos" });
+  }
+};
+
+// Devolve o conteúdo do documento guardado na base de dados.
+exports.abrirDocumento = async (req, res) => {
+  try {
+    const doc = await documentoDaOrganizacao(req.params.docId, req.organizacao_id);
+    if (!doc) return res.status(404).json({ erro: "Documento não encontrado" });
+    if (!doc.conteudo || !doc.conteudo.length) {
+      return res.status(410).json({ erro: "Ficheiro indisponível (não existe cópia guardada)" });
+    }
+
+    const nomeSeguro = String(doc.nome_original || "documento").replace(/[^\w.\- ]+/g, "_");
+    const mime = mimeDoDocumento(nomeSeguro);
+    res.setHeader("Content-Type", mime);
+    res.setHeader("Content-Length", doc.conteudo.length);
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    const disposicao = mime === "application/octet-stream" ? "attachment" : "inline";
+    res.setHeader("Content-Disposition", `${disposicao}; filename*=UTF-8''${encodeURIComponent(nomeSeguro)}`);
+    return res.end(doc.conteudo);
+  } catch (e) {
+    console.error("Erro ao abrir documento do cliente:", e);
+    return res.status(500).json({ erro: "Erro ao abrir documento" });
+  }
+};
+
+// Um documento nunca é eliminado: fica no histórico marcado como anulado.
+exports.anularDocumento = async (req, res) => {
+  try {
+    const doc = await documentoDaOrganizacao(req.params.docId, req.organizacao_id);
+    if (!doc) return res.status(404).json({ erro: "Documento não encontrado" });
+    if (doc.anulado) return res.status(400).json({ erro: "Este documento já está anulado" });
+
+    await doc.update({
+      anulado: true,
+      anulado_em: new Date(),
+      anulado_por: req.usuario?.nome || req.usuario?.email || "",
+    });
+    return res.json(serializarDocumento(doc));
+  } catch (e) {
+    console.error("Erro ao anular documento do cliente:", e);
+    return res.status(500).json({ erro: "Erro ao anular documento" });
   }
 };

@@ -12,6 +12,7 @@ router.post("/", requirePermissao("comercial", "criar"), PropostaController.cria
 router.put("/:id/estado", requirePermissao("comercial", "editar"), PropostaController.mudarEstado);
 router.put("/:id/orcamento", requirePermissao("comercial", "editar"), PropostaController.vincularOrcamento);
 router.put("/:id", requirePermissao("comercial", "editar"), PropostaController.atualizar);
-router.delete("/:id", requirePermissao("comercial", "eliminar"), PropostaController.remover);
+// Propostas não são eliminadas: apenas anuladas, com motivo obrigatório.
+router.post("/:id/anular", requirePermissao("comercial", "editar"), PropostaController.anular);
 
 module.exports = router;

@@ -10,6 +10,7 @@ router.get("/:id", requirePermissao("comercial", "ver"), OrcamentoController.bus
 router.post("/", requirePermissao("comercial", "criar"), OrcamentoController.criar);
 router.post("/:id/enviar-producao", requirePermissao("comercial", "editar"), OrcamentoController.enviarProducao);
 router.put("/:id", requirePermissao("comercial", "editar"), OrcamentoController.atualizar);
-router.delete("/:id", requirePermissao("comercial", "eliminar"), OrcamentoController.remover);
+// Orçamentos não são eliminados: apenas anulados, com motivo obrigatório.
+router.post("/:id/anular", requirePermissao("comercial", "editar"), OrcamentoController.anular);
 
 module.exports = router;

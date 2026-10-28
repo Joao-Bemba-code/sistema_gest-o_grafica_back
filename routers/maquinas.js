@@ -5,8 +5,8 @@ const requirePermissao = require("../protect/perm");
 
 router.use(auth);
 
-router.get("/", MaquinaController.listar);
-router.get("/:id", MaquinaController.buscarPorId);
+router.get("/", requirePermissao("maquinas", "ver"), MaquinaController.listar);
+router.get("/:id", requirePermissao("maquinas", "ver"), MaquinaController.buscarPorId);
 router.post("/", requirePermissao("maquinas", "criar"), MaquinaController.criar);
 router.put("/:id", requirePermissao("maquinas", "editar"), MaquinaController.atualizar);
 router.delete("/:id", requirePermissao("maquinas", "eliminar"), MaquinaController.remover);

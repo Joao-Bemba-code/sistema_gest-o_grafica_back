@@ -8,11 +8,58 @@ const UPLOADS = process.env.SIGRAF_UPLOADS || path.join(__dirname, "uploads");
 
 fs.mkdirSync(UPLOADS, { recursive: true });
 
+// Origens autorizadas a chamar a API pelo browser. Configurar em produção:
+// APP_ORIGINS=https://app.exemplo.com,https://admin.exemplo.com
+const ORIGENS = String(process.env.APP_ORIGINS || "")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+
+function corsDaApi() {
+  return cors({
+    origin(origem, callback) {
+      // Sem Origin (curl, apps desktop, health check) não há CORS a aplicar.
+      if (!origem) return callback(null, true);
+      if (!ORIGENS.length) {
+        // Ainda não configurado: mantém o comportamento antigo para não
+        // bloquear a aplicação, mas avisa no arranque.
+        return callback(null, true);
+      }
+      return callback(null, ORIGENS.includes(origem));
+    },
+    credentials: true,
+  });
+}
+
+function cabecalhosSeguranca(req, res, next) {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  res.setHeader("Cross-Origin-Resource-Policy", "same-site");
+  if (process.env.NODE_ENV === "production") {
+    res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  }
+  next();
+}
+
 function criarApp(opcoes = {}) {
   const app = express();
-  app.set("trust proxy", true);
-  app.use(cors());
-  app.use(sanitize);
+  // Confiar em todos os proxies permitia falsificar X-Forwarded-For e escapar
+  // ao limite de tentativas. Na Render existe exatamente 1 proxy à frente.
+  const trustProxy = process.env.TRUST_PROXY;
+  app.set(
+    "trust proxy",
+    trustProxy === undefined
+      ? process.env.NODE_ENV === "production"
+        ? 1
+        : 0
+      : trustProxy === "true"
+        ? true
+        : Number(trustProxy) || 0
+  );
+  app.use(corsDaApi());
+  app.use(cabecalhosSeguranca);
   app.use("/api", (req, res, next) => {
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
     next();
@@ -37,8 +84,24 @@ function criarApp(opcoes = {}) {
     app.use("/api", proxy(opcoes.proxyUrl));
     app.use("/uploads", proxy(opcoes.proxyUrl));
   } else {
-    app.use(express.json({ limit: "100mb" }));
-    app.use("/uploads", express.static(UPLOADS));
+    app.use(express.json({ limit: process.env.JSON_LIMIT || "10mb" }));
+    // A sanitização tem de correr DEPOIS do parser: antes, req.body ainda não
+    // existe e o corpo JSON não era limpo. O sanitize ignora senhas e HTML
+    // legítimo (ex.: template de contrato), que seriam corrompidos pelo xss().
+    app.use(sanitize);
+    app.use(
+      "/uploads",
+      express.static(UPLOADS, {
+        dotfiles: "deny",
+        index: false,
+        maxAge: "7d",
+        setHeaders(res) {
+          res.setHeader("X-Content-Type-Options", "nosniff");
+          // Impede que um SVG antigo execute scripts ao ser aberto diretamente.
+          res.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+        },
+      })
+    );
     app.use("/api/auth", require("./routers/auth"));
     app.use("/api/usuarios", require("./routers/usuarios"));
     app.use("/api/clientes", require("./routers/clientes"));

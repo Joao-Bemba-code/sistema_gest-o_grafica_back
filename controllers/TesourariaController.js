@@ -1,9 +1,33 @@
 const { TesourariaMovimento, TesourariaAnexo, ContaBancaria, Cliente, Faturacao, Usuario } = require("../models");
 const { Op, fn, col, literal } = require("sequelize");
 const { gerarExcel } = require("../services/tesourariaExcel");
+const auditoria = require("../services/auditoria");
 
 const ESTADOS = ["pendente", "confirmado", "cancelado", "anulado"];
 const TIPOS = ["entrada", "saida", "transferencia"];
+
+// As contas bancárias nunca podem ser obtidas apenas pelo id: o id é enviado
+// pelo cliente e podia pertencer a outra empresa. Toda a movimentação de saldo
+// passa por aqui, com o filtro de organização incluído.
+async function contaDaOrganizacao(id, organizacaoId) {
+  if (id == null || id === "") return null;
+  return ContaBancaria.findOne({ where: { id, organizacao_id: organizacaoId } });
+}
+
+// Tipo devolvido ao browser derivado da extensão guardada, nunca do mimetype
+// enviado pelo cliente (que permitia servir HTML como se fosse PDF).
+const MIME_ANEXO = {
+  ".pdf": "application/pdf",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+};
+
+function mimeDoAnexo(nome) {
+  const ext = String(nome || "").toLowerCase().match(/\.[a-z0-9]+$/)?.[0] || "";
+  return MIME_ANEXO[ext] || "application/octet-stream";
+}
 
 function normalizarCategoria(tipo, valor) {
   const texto = String(valor || "").trim().slice(0, 100);
@@ -112,9 +136,13 @@ exports.criar = async (req, res) => {
       observacoes: observacoes || null,
     });
 
-    if (conta_bancaria_id && movimento.estado === "confirmado") {
-      const conta = await ContaBancaria.findByPk(conta_bancaria_id);
-      if (conta) {
+    if (conta_bancaria_id) {
+      const conta = await contaDaOrganizacao(conta_bancaria_id, req.organizacao_id);
+      if (!conta) {
+        await movimento.destroy();
+        return res.status(422).json({ erro: "Conta bancária inválida para esta empresa" });
+      }
+      if (movimento.estado === "confirmado") {
         const novoSaldo = tipo === "entrada"
           ? Number(conta.saldo_atual) + valorNum
           : Number(conta.saldo_atual) - valorNum;
@@ -122,9 +150,13 @@ exports.criar = async (req, res) => {
       }
     }
 
-    if (tipo === "transferencia" && conta_destino_id && movimento.estado === "confirmado") {
-      const contaDest = await ContaBancaria.findByPk(conta_destino_id);
-      if (contaDest) {
+    if (tipo === "transferencia" && conta_destino_id) {
+      const contaDest = await contaDaOrganizacao(conta_destino_id, req.organizacao_id);
+      if (!contaDest) {
+        await movimento.destroy();
+        return res.status(422).json({ erro: "Conta de destino inválida para esta empresa" });
+      }
+      if (movimento.estado === "confirmado") {
         const novoSaldo = Number(contaDest.saldo_atual) + valorNum;
         await contaDest.update({ saldo_atual: Number(novoSaldo.toFixed(2)) });
       }
@@ -190,7 +222,7 @@ exports.anular = async (req, res) => {
     if (eraConfirmado) {
       // Repor o saldo da conta de origem.
       if (movimento.conta_bancaria_id) {
-        const conta = await ContaBancaria.findByPk(movimento.conta_bancaria_id);
+        const conta = await contaDaOrganizacao(movimento.conta_bancaria_id, req.organizacao_id);
         if (conta) {
           const novoSaldo = movimento.tipo === "entrada"
             ? Number(conta.saldo_atual) - Number(movimento.valor)
@@ -200,7 +232,7 @@ exports.anular = async (req, res) => {
       }
       // Repor o saldo da conta destino (transferência).
       if (movimento.tipo === "transferencia" && movimento.conta_destino_id) {
-        const contaDest = await ContaBancaria.findByPk(movimento.conta_destino_id);
+        const contaDest = await contaDaOrganizacao(movimento.conta_destino_id, req.organizacao_id);
         if (contaDest) {
           const novoSaldo = Number(contaDest.saldo_atual) - Number(movimento.valor);
           await contaDest.update({ saldo_atual: Number(novoSaldo.toFixed(2)) });
@@ -212,6 +244,17 @@ exports.anular = async (req, res) => {
       anulado_por: req.usuario?.nome || null,
       data_anulacao: new Date(),
       motivo_anulacao: req.body?.motivo ? String(req.body.motivo).trim() : null,
+    });
+    auditoria.registrar({
+      req,
+      acao: "tesouraria.anular",
+      alvoTipo: "movimento",
+      alvoId: movimento.id,
+      detalhe: {
+        tipo: movimento.tipo,
+        valor: Number(movimento.valor),
+        motivo: req.body?.motivo ? String(req.body.motivo).trim() : null,
+      },
     });
     return res.json({ mensagem: "Movimento anulado com sucesso", movimento: movimento.id });
   } catch (e) {
@@ -557,11 +600,14 @@ exports.downloadAnexo = async (req, res) => {
       return res.status(410).json({ erro: "Ficheiro indisponível (não existe cópia guardada)" });
     }
 
-    res.setHeader("Content-Type", anexo.mime || "application/octet-stream");
+    const nomeSeguro = String(anexo.nome_original || "anexo").replace(/[^\w.\- ]+/g, "_");
+    const mime = mimeDoAnexo(nomeSeguro);
+    res.setHeader("Content-Type", mime);
     res.setHeader("Content-Length", anexo.conteudo.length);
     res.setHeader("Cache-Control", "private, max-age=3600");
-    const nomeSeguro = String(anexo.nome_original || "anexo").replace(/[^\w.\- ]+/g, "_");
-    res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(nomeSeguro)}`);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    const disposicao = mime === "application/octet-stream" ? "attachment" : "inline";
+    res.setHeader("Content-Disposition", `${disposicao}; filename*=UTF-8''${encodeURIComponent(nomeSeguro)}`);
     return res.end(anexo.conteudo);
   } catch (e) {
     console.error("Erro ao devolver anexo:", e);

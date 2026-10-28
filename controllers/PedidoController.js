@@ -67,11 +67,11 @@ async function proximoNumero(organizacao_id) {
     let seq = await Sequencia.findOne({ where: { organizacao_id }, transaction: t, lock });
     if (!seq) {
       seq = await Sequencia.create({ organizacao_id, numero: 1 }, { transaction: t });
-      return "PED-0001";
+      return "KPED-0001";
     }
     const novo = Number(seq.numero || 0) + 1;
     await seq.update({ numero: novo }, { transaction: t });
-    return `PED-${String(novo).padStart(4, "0")}`;
+    return `KPED-${String(novo).padStart(4, "0")}`;
   });
 }
 

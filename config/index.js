@@ -8,6 +8,18 @@ const define = {
 };
 const dialect = (process.env.Lang || "mysql").toLowerCase();
 
+// Em produção não se arranca com credenciais por omissão (root/1234) nem sem
+// segredo JWT: seria uma porta aberta silenciosa.
+if (process.env.NODE_ENV === "production") {
+  const obrigatorias = ["SECRET", "Database_Name", "Database_User", "Database_Pass"];
+  const faltam = obrigatorias.filter((nome) => !process.env[nome]);
+  if (faltam.length) {
+    throw new Error(
+      `Configuração em falta no ambiente de produção: ${faltam.join(", ")}`
+    );
+  }
+}
+
 let sequelize;
 if (dialect === "sqlite") {
   sequelize = new Sequelize({
@@ -28,7 +40,17 @@ if (dialect === "sqlite") {
       logging: false,
       define,
       dialectOptions:
-        process.env.Ssl === "false" ? {} : { ssl: { require: true, rejectUnauthorized: false } },
+        process.env.Ssl === "false"
+          ? {}
+          : {
+              ssl: {
+                require: true,
+                // Valida o certificado do servidor por omissão (M3 do relatório).
+                // Só desligar com DB_TLS_INSECURE=true, p. ex. servidor próprio
+                // com certificado auto-assinado.
+                rejectUnauthorized: process.env.DB_TLS_INSECURE !== "true",
+              },
+            },
     }
   );
 }

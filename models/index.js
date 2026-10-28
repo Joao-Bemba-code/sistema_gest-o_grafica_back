@@ -33,13 +33,19 @@ const TesourariaMovimento = require("./TesourariaMovimento");
 const TesourariaAnexo = require("./TesourariaAnexo");
 const Divida = require("./Divida");
 const SerieAGT = require("./SerieAGT");
+const AgtConfiguracao = require("./AgtConfiguracao");
 const Bem = require("./Bem");
 const SuporteUsuario = require("./SuporteUsuario");
 const SuporteAuditoria = require("./SuporteAuditoria");
+const Auditoria = require("./Auditoria");
 const CaixaSessao = require("./CaixaSessao");
 const RateioCusto = require("./RateioCusto");
 const Proposta = require("./Proposta");
 const PropostaEvento = require("./PropostaEvento");
+const ClienteDocumento = require("./ClienteDocumento");
+
+SuporteUsuario.hasMany(SuporteAuditoria, { foreignKey: "suporte_usuario_id" });
+SuporteAuditoria.belongsTo(SuporteUsuario, { foreignKey: "suporte_usuario_id" });
 
 Organizacao.hasMany(Usuario, { foreignKey: "organizacao_id" });
 Usuario.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
@@ -49,8 +55,18 @@ LoginLog.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
 Usuario.hasMany(LoginLog, { foreignKey: "usuario_id" });
 LoginLog.belongsTo(Usuario, { foreignKey: "usuario_id" });
 
+Organizacao.hasMany(Auditoria, { foreignKey: "organizacao_id" });
+Auditoria.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
+Usuario.hasMany(Auditoria, { foreignKey: "usuario_id" });
+Auditoria.belongsTo(Usuario, { foreignKey: "usuario_id" });
+
 Organizacao.hasMany(Cliente, { foreignKey: "organizacao_id" });
 Cliente.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
+
+Organizacao.hasMany(ClienteDocumento, { foreignKey: "organizacao_id" });
+ClienteDocumento.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
+Cliente.hasMany(ClienteDocumento, { foreignKey: "cliente_id", as: "documentos" });
+ClienteDocumento.belongsTo(Cliente, { foreignKey: "cliente_id" });
 
 Organizacao.hasMany(Categoria, { foreignKey: "organizacao_id" });
 Categoria.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
@@ -135,6 +151,9 @@ Faturacao.belongsTo(OrdemProducao, { foreignKey: "ordem_producao_id" });
 
 Organizacao.hasMany(SerieAGT, { foreignKey: "organizacao_id" });
 SerieAGT.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
+
+Organizacao.hasOne(AgtConfiguracao, { foreignKey: "organizacao_id" });
+AgtConfiguracao.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
 
 Organizacao.hasMany(Bem, { foreignKey: "organizacao_id" });
 Bem.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
@@ -260,11 +279,14 @@ module.exports = {
   TesourariaAnexo,
   Divida,
   SerieAGT,
+  AgtConfiguracao,
   Bem,
   SuporteUsuario,
   SuporteAuditoria,
+  Auditoria,
   CaixaSessao,
   RateioCusto,
   Proposta,
   PropostaEvento,
+  ClienteDocumento,
 };

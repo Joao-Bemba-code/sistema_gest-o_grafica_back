@@ -34,7 +34,7 @@ async function proximoNumero(organizacao_id, t) {
   }
   const novo = Number(seq.numero || 0) + 1;
   await seq.update({ numero: novo }, { transaction: t });
-  return `REQ-${String(novo).padStart(4, "0")}`;
+  return `KREQ-${String(novo).padStart(4, "0")}`;
 }
 
 function serializar(r) {

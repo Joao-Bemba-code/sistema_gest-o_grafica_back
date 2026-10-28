@@ -79,14 +79,15 @@ async function exportarSqlite(destinoArg, opcoes = {}) {
   if ((process.env.Lang || "").toLowerCase() === "sqlite") {
     log("A copiar base SQLite (VACUUM INTO)...");
     await sequelize.query("VACUUM INTO ?", { replacements: [destino.replace(/\\/g, "/")] });
-    await sequelize.close();
+    // Nunca fechar o pool: o processo que atende a API continuaria a correr
+    // sem base de dados até ser reiniciado (negação de serviço).
     const kb = Math.max(1, Math.round(fs.statSync(destino).size / 1024));
     return { destino, kb };
   }
 
   log("A ler dados da base atual...");
   const { tabelas, colunasPorTabela, total } = await lerDadosRelacionais(log);
-  await sequelize.close();
+  // Não fechar o pool aqui (ver nota acima).
 
   if (total === 0) throw new Error("A base esta vazia — nada a exportar.");
 
@@ -95,6 +96,11 @@ async function exportarSqlite(destinoArg, opcoes = {}) {
 
   log(`Total: ${total} registos. A criar base SQLite...`);
   const carregar = path.join(__dirname, "..", "sqlite_carregar.js");
+  if (!fs.existsSync(carregar)) {
+    throw new Error(
+      "Exportação para SQLite indisponível: falta o ficheiro sqlite_carregar.js no backend."
+    );
+  }
   const envFilho = { ...process.env, Lang: "sqlite", Sqlite_File: destino };
   execFileSync(process.execPath, [carregar, jsonTmp], { env: envFilho, stdio: opcoes.herdarStdio ? "inherit" : "pipe" });
   fs.unlinkSync(jsonTmp);

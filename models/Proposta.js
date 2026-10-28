@@ -21,6 +21,10 @@ const Proposta = sequelize.define("proposta", {
   motivo_rejeicao: { type: DataTypes.TEXT },
   orcamento_id: { type: DataTypes.INTEGER, allowNull: true },
   usuario_id: { type: DataTypes.INTEGER },
+  anulado: { type: DataTypes.BOOLEAN, defaultValue: false },
+  motivo_anulacao: { type: DataTypes.TEXT },
+  anulado_por: { type: DataTypes.STRING(200) },
+  data_anulacao: { type: DataTypes.DATE, allowNull: true },
   deleted: { type: DataTypes.BOOLEAN, defaultValue: false },
   deletedAt: { type: DataTypes.DATE, allowNull: true },
 }, {
