@@ -49,6 +49,12 @@ function serializarCliente(cli) {
 }
 
 function dataValidade(p) {
+  if (p.validade_data) {
+    const texto = p.validade_data instanceof Date
+      ? p.validade_data.toISOString().slice(0, 10)
+      : String(p.validade_data).slice(0, 10);
+    if (texto) return texto;
+  }
   const base = p.data_envio || p.createdAt;
   if (!base) return null;
   const data = new Date(base);
@@ -57,6 +63,12 @@ function dataValidade(p) {
   const mes = String(data.getMonth() + 1).padStart(2, "0");
   const dia = String(data.getDate()).padStart(2, "0");
   return `${data.getFullYear()}-${mes}-${dia}`;
+}
+
+function dataISO(valor) {
+  if (!valor) return null;
+  if (valor instanceof Date) return valor.toISOString().slice(0, 10);
+  return String(valor).slice(0, 10);
 }
 
 function serializar(p, eventos) {
@@ -73,7 +85,12 @@ function serializar(p, eventos) {
     cliente: serializarCliente(dados.cliente),
     objecto: dados.objecto,
     descricao: dados.descricao || "",
+    data_emissao: dataISO(dados.data_emissao) || dataISO(dados.createdAt),
+    valor: Number(dados.valor) || 0,
+    condicoes_pagamento: dados.condicoes_pagamento || "",
     prazo_execucao: dados.prazo_execucao || "",
+    prazo_entrega: dados.prazo_entrega || "",
+    responsavel_comercial: dados.responsavel_comercial || "",
     validade: Number(dados.validade) || 0,
     validade_data: dataValidade(dados),
     estado: dados.estado,
@@ -138,8 +155,24 @@ function normalizarDados(body) {
   if (body.unidade !== undefined) dados.unidade = String(body.unidade).trim();
   if (body.objecto !== undefined) dados.objecto = lerTexto(body.objecto, 200);
   if (body.descricao !== undefined) dados.descricao = lerTexto(body.descricao);
+  if (body.data_emissao !== undefined || body.dataEmissao !== undefined) {
+    dados.data_emissao = lerTexto(body.data_emissao ?? body.dataEmissao, 10) || null;
+  }
+  if (body.validade_data !== undefined || body.validadeData !== undefined) {
+    dados.validade_data = lerTexto(body.validade_data ?? body.validadeData, 10) || null;
+  }
+  if (body.valor !== undefined) dados.valor = Number(body.valor) || 0;
+  if (body.condicoes_pagamento !== undefined || body.condicoesPagamento !== undefined) {
+    dados.condicoes_pagamento = lerTexto(body.condicoes_pagamento ?? body.condicoesPagamento, 200);
+  }
   if (body.prazo_execucao !== undefined || body.prazoExecucao !== undefined) {
     dados.prazo_execucao = lerTexto(body.prazo_execucao ?? body.prazoExecucao, 100);
+  }
+  if (body.prazo_entrega !== undefined || body.prazoEntrega !== undefined) {
+    dados.prazo_entrega = lerTexto(body.prazo_entrega ?? body.prazoEntrega, 100);
+  }
+  if (body.responsavel_comercial !== undefined || body.responsavelComercial !== undefined) {
+    dados.responsavel_comercial = lerTexto(body.responsavel_comercial ?? body.responsavelComercial, 150);
   }
   if (body.validade !== undefined) dados.validade = Number(body.validade);
   return dados;
@@ -213,8 +246,10 @@ exports.criar = async (req, res) => {
     if (erro) return res.status(422).json({ erro });
 
     const numero = await proximoNumero(req.organizacao_id, dados.unidade);
+    const hoje = new Date().toISOString().slice(0, 10);
     const proposta = await Proposta.create({
       ...dados,
+      data_emissao: dados.data_emissao || hoje,
       numero,
       estado: "rascunho",
       organizacao_id: req.organizacao_id,

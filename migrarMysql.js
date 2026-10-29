@@ -53,6 +53,8 @@ async function aplicarMigracoesMysql(sequelize) {
   await adicionar("cliente", "setor_atividade", "VARCHAR(100) NULL");
   await adicionar("cliente", "fonte_origem", "VARCHAR(100) NULL");
   await adicionar("cliente", "referencia_interna", "VARCHAR(200) NULL");
+  // Responsável comercial interno pelo cliente (ficha COM-CLI-01).
+  await adicionar("cliente", "responsavel_comercial", "VARCHAR(150) NULL");
 
   // Histórico de mudanças de estado das máquinas (JSON: [{estado,data,motivo}])
   await adicionar("maquina", "historico_estados", "JSON NULL");
@@ -353,6 +355,14 @@ async function aplicarMigracoesMysql(sequelize) {
   await adicionar("proposta", "motivo_anulacao", "TEXT NULL");
   await adicionar("proposta", "anulado_por", "VARCHAR(200) NULL");
   await adicionar("proposta", "data_anulacao", "DATETIME NULL");
+
+  // Proposta comercial (COM-PRO-01): emissão, validade, condições e responsável.
+  await adicionar("proposta", "data_emissao", "DATE NULL");
+  await adicionar("proposta", "validade_data", "DATE NULL");
+  await adicionar("proposta", "valor", "DECIMAL(14,2) NOT NULL DEFAULT 0");
+  await adicionar("proposta", "condicoes_pagamento", "VARCHAR(200) NULL");
+  await adicionar("proposta", "prazo_entrega", "VARCHAR(100) NULL");
+  await adicionar("proposta", "responsavel_comercial", "VARCHAR(150) NULL");
   await adicionar("orcamento", "anulado", "TINYINT(1) NOT NULL DEFAULT 0");
   await adicionar("orcamento", "motivo_anulacao", "TEXT NULL");
   await adicionar("orcamento", "anulado_por", "VARCHAR(200) NULL");

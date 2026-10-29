@@ -31,6 +31,8 @@ const Cliente = sequelize.define("cliente", {
   setor_atividade: { type: DataTypes.STRING(100) },
   fonte_origem: { type: DataTypes.STRING(100) },
   referencia_interna: { type: DataTypes.STRING(200) },
+  // Responsável comercial interno pelo cliente.
+  responsavel_comercial: { type: DataTypes.STRING(150) },
   // Pessoa de contacto do cliente (responsável directo pelos assuntos).
   pessoa_contacto: { type: DataTypes.STRING(150) },
   pessoa_funcao: { type: DataTypes.STRING(100) },
