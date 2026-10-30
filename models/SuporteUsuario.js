@@ -8,6 +8,8 @@ const SuporteUsuario = sequelize.define("suporte_usuario", {
   nome: { type: DataTypes.STRING(150), allowNull: false },
   email: { type: DataTypes.STRING(100), allowNull: false, unique: { name: "suporte_usuario_email_uk" } },
   senha: { type: DataTypes.STRING(255), allowNull: false },
+  // Revogação de sessões de suporte (incrementa ao mudar senha/email/estado).
+  token_version: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
   ativo: { type: DataTypes.BOOLEAN, defaultValue: true },
   // 2FA TOTP: o segredo fica cifrado (AES-256-GCM) — ver services/totp.js.
   totp_secret: { type: DataTypes.TEXT, allowNull: true },

@@ -3,6 +3,21 @@ const JANELA_MS = 10 * 60 * 1000;
 
 const falhasIp = new Map();
 const falhasConta = new Map();
+let ultimaLimpeza = 0;
+
+// Sem limpeza os mapas crescem indefinidamente (memória) com cada IP/email
+// distinto que alguma vez falhou o login. Limpa entradas expiradas no máximo
+// uma vez por minuto.
+function limparExpiradas() {
+  const agora = Date.now();
+  if (agora - ultimaLimpeza < 60 * 1000) return;
+  ultimaLimpeza = agora;
+  for (const mapa of [falhasIp, falhasConta]) {
+    for (const [chave, registo] of mapa) {
+      if (!registo || agora >= registo.ate) mapa.delete(chave);
+    }
+  }
+}
 
 function chaveIp(req) {
   return req.ip || req.connection?.remoteAddress || "desconhecido";
@@ -20,6 +35,7 @@ function excedido(mapa, chave) {
 }
 
 function bloquear(req, res, next) {
+  limparExpiradas();
   const chave = chaveIp(req);
   const conta = chaveConta(req);
   if (excedido(falhasIp, chave) || excedido(falhasConta, conta)) {

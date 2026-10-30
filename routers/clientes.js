@@ -24,6 +24,8 @@ router.patch(
 );
 router.get("/:id/documentos", podeVer, ClienteController.listarDocumentos);
 router.post("/:id/documentos", podeEditar, uploadAnexos, ClienteController.anexarDocumentos);
+// Histórico de auditoria do cliente (quem criou, alterou, anulou, etc.).
+router.get("/:id/historico", podeVer, ClienteController.historico);
 
 // A página de Relatórios usa os clientes sem exigir acesso ao módulo
 // Comercial: quem pode ver relatórios pode ler esta lista.

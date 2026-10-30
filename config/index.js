@@ -20,6 +20,25 @@ if (process.env.NODE_ENV === "production") {
   }
 }
 
+// Um token de suporte nunca pode ser confundido com um token da aplicação.
+// Se os dois segredos forem iguais, um token de suporte passaria a ser válido
+// no SIGRAF (e vice-versa), por isso o arranque falha de forma explícita.
+if (
+  process.env.SECRET &&
+  process.env.SECRET_SUPORTE &&
+  process.env.SECRET === process.env.SECRET_SUPORTE
+) {
+  throw new Error("SECRET e SECRET_SUPORTE não podem ser iguais: use segredos distintos.");
+}
+
+// Segredos curtos são fáceis de adivinhar/forçar offline.
+for (const nome of ["SECRET", "SECRET_SUPORTE"]) {
+  const valor = process.env[nome];
+  if (valor && valor.length < 32) {
+    console.warn(`[segurança] ${nome} tem menos de 32 caracteres; use um valor aleatório mais longo.`);
+  }
+}
+
 let sequelize;
 if (dialect === "sqlite") {
   sequelize = new Sequelize({

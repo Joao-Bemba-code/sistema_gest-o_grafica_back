@@ -1,4 +1,4 @@
-const { sequelize, Proposta, PropostaEvento, Cliente, Orcamento, Usuario } = require("../models");
+const { sequelize, Proposta, PropostaEvento, PropostaDocumento, Cliente, Orcamento, Usuario } = require("../models");
 const { Op, Transaction } = require("sequelize");
 
 const UNIDADES = {
@@ -25,6 +25,38 @@ const CAMPO_DATA = {
   avaliada: "data_avaliada",
   aprovada: "data_aprovada",
   rejeitada: "data_rejeitada",
+};
+
+// Rótulos dos campos para o registo de quem alterou a proposta.
+const ROTULO_CAMPO = {
+  cliente_id: "cliente",
+  unidade: "unidade de negócio",
+  versao: "versão",
+  tipo: "tipo",
+  origem: "origem",
+  objecto: "objecto",
+  familia: "família",
+  produto: "produto",
+  produtos: "produtos",
+  formato: "formato",
+  quantidade: "quantidade",
+  suporte: "suporte",
+  cores: "cores",
+  acabamento: "acabamento",
+  descricao: "descrição",
+  data_emissao: "data de emissão",
+  validade_data: "validade",
+  valor: "valor",
+  condicoes_pagamento: "condições de pagamento",
+  prazo_execucao: "prazo de execução",
+  prazo_entrega: "prazo de entrega",
+  local_entrega: "local de entrega",
+  condicoes_entrega: "condições de entrega",
+  observacoes: "observações",
+  estado_documental: "estado documental",
+  modelo_documental: "modelo documental",
+  responsavel_comercial: "responsável comercial",
+  validade: "validade em dias",
 };
 
 function includeCliente() {
@@ -71,6 +103,18 @@ function dataISO(valor) {
   return String(valor).slice(0, 10);
 }
 
+// Lista de produtos acabados da proposta. Propostas antigas guardavam um
+// único produto nas colunas produto/quantidade — convertem-se numa lista.
+function produtosDaProposta(dados) {
+  if (Array.isArray(dados.produtos) && dados.produtos.length) {
+    return dados.produtos
+      .filter((p) => p && String(p.nome || "").trim())
+      .map((p) => ({ nome: String(p.nome).trim(), quantidade: String(p.quantidade || "").trim() }));
+  }
+  if (dados.produto) return [{ nome: dados.produto, quantidade: dados.quantidade || "" }];
+  return [];
+}
+
 function serializar(p, eventos) {
   const dados = p.toJSON ? p.toJSON() : p;
   const eventosOrdenados = [...(eventos || dados.eventos || [])].sort(
@@ -83,13 +127,29 @@ function serializar(p, eventos) {
     unidade_rotulo: UNIDADES[dados.unidade]?.rotulo || "",
     cliente_id: dados.cliente_id,
     cliente: serializarCliente(dados.cliente),
+    versao: dados.versao || "",
+    tipo: dados.tipo || "",
+    origem: dados.origem || "",
     objecto: dados.objecto,
+    familia: dados.familia || "",
+    produto: dados.produto || "",
+    produtos: produtosDaProposta(dados),
+    formato: dados.formato || "",
+    quantidade: dados.quantidade || "",
+    suporte: dados.suporte || "",
+    cores: dados.cores || "",
+    acabamento: dados.acabamento || "",
     descricao: dados.descricao || "",
     data_emissao: dataISO(dados.data_emissao) || dataISO(dados.createdAt),
     valor: Number(dados.valor) || 0,
     condicoes_pagamento: dados.condicoes_pagamento || "",
     prazo_execucao: dados.prazo_execucao || "",
     prazo_entrega: dados.prazo_entrega || "",
+    local_entrega: dados.local_entrega || "",
+    condicoes_entrega: dados.condicoes_entrega || "",
+    observacoes: dados.observacoes || "",
+    estado_documental: dados.estado_documental || "",
+    modelo_documental: dados.modelo_documental || "",
     responsavel_comercial: dados.responsavel_comercial || "",
     validade: Number(dados.validade) || 0,
     validade_data: dataValidade(dados),
@@ -153,7 +213,26 @@ function normalizarDados(body) {
   const dados = {};
   if (body.cliente_id !== undefined) dados.cliente_id = Number(body.cliente_id) || null;
   if (body.unidade !== undefined) dados.unidade = String(body.unidade).trim();
+  if (body.versao !== undefined) dados.versao = lerTexto(body.versao, 20);
+  if (body.tipo !== undefined) dados.tipo = lerTexto(body.tipo, 100);
+  if (body.origem !== undefined) dados.origem = lerTexto(body.origem, 100);
   if (body.objecto !== undefined) dados.objecto = lerTexto(body.objecto, 200);
+  if (body.familia !== undefined) dados.familia = lerTexto(body.familia, 100);
+  if (body.produto !== undefined) dados.produto = lerTexto(body.produto, 150);
+  if (body.formato !== undefined) dados.formato = lerTexto(body.formato, 100);
+  if (body.quantidade !== undefined) dados.quantidade = lerTexto(body.quantidade, 100);
+  if (body.suporte !== undefined) dados.suporte = lerTexto(body.suporte, 100);
+  if (body.produtos !== undefined) {
+    const lista = Array.isArray(body.produtos) ? body.produtos : [];
+    dados.produtos = lista
+      .map((p) => ({
+        nome: lerTexto(p?.nome, 150) || "",
+        quantidade: lerTexto(p?.quantidade, 100) || "",
+      }))
+      .filter((p) => p.nome);
+  }
+  if (body.cores !== undefined) dados.cores = lerTexto(body.cores, 100);
+  if (body.acabamento !== undefined) dados.acabamento = lerTexto(body.acabamento, 150);
   if (body.descricao !== undefined) dados.descricao = lerTexto(body.descricao);
   if (body.data_emissao !== undefined || body.dataEmissao !== undefined) {
     dados.data_emissao = lerTexto(body.data_emissao ?? body.dataEmissao, 10) || null;
@@ -170,6 +249,19 @@ function normalizarDados(body) {
   }
   if (body.prazo_entrega !== undefined || body.prazoEntrega !== undefined) {
     dados.prazo_entrega = lerTexto(body.prazo_entrega ?? body.prazoEntrega, 100);
+  }
+  if (body.local_entrega !== undefined || body.localEntrega !== undefined) {
+    dados.local_entrega = lerTexto(body.local_entrega ?? body.localEntrega, 200);
+  }
+  if (body.condicoes_entrega !== undefined || body.condicoesEntrega !== undefined) {
+    dados.condicoes_entrega = lerTexto(body.condicoes_entrega ?? body.condicoesEntrega, 200);
+  }
+  if (body.observacoes !== undefined) dados.observacoes = lerTexto(body.observacoes);
+  if (body.estado_documental !== undefined || body.estadoDocumental !== undefined) {
+    dados.estado_documental = lerTexto(body.estado_documental ?? body.estadoDocumental, 50);
+  }
+  if (body.modelo_documental !== undefined || body.modeloDocumental !== undefined) {
+    dados.modelo_documental = lerTexto(body.modelo_documental ?? body.modeloDocumental, 100);
   }
   if (body.responsavel_comercial !== undefined || body.responsavelComercial !== undefined) {
     dados.responsavel_comercial = lerTexto(body.responsavel_comercial ?? body.responsavelComercial, 150);
@@ -278,7 +370,28 @@ exports.atualizar = async (req, res) => {
     const erro = await validar(dados, req.organizacao_id, { parcial: true });
     if (erro) return res.status(422).json({ erro });
 
+    // Campos realmente alterados, para o registo de quem editou.
+    const alterados = Object.keys(dados).filter((campo) => {
+      const antes = proposta[campo];
+      const depois = dados[campo];
+      if (campo === "produtos") {
+        return JSON.stringify(Array.isArray(antes) ? antes : []) !== JSON.stringify(Array.isArray(depois) ? depois : []);
+      }
+      if (antes === depois) return false;
+      if (antes === undefined || antes === null) return depois !== undefined && depois !== null;
+      return String(antes) !== String(depois);
+    });
+
     await proposta.update(dados);
+    await registarEvento(
+      proposta.id,
+      "rascunho",
+      req.usuario.id,
+      alterados.length
+        ? `Alterou: ${alterados.map((c) => ROTULO_CAMPO[c] || c).join(", ")}`
+        : "Guardou sem alterações"
+    );
+
     const completa = await carregarCompleta(proposta.id, req.organizacao_id);
     return res.json(serializar(completa));
   } catch (e) {
@@ -401,4 +514,141 @@ exports.unidades = (req, res) => {
   return res.json(
     Object.entries(UNIDADES).map(([codigo, u]) => ({ codigo, sigla: u.sigla, rotulo: u.rotulo }))
   );
+};
+
+// ─── Documentos (anexos) da proposta ───
+
+// Tipo devolvido ao browser derivado da extensão guardada, nunca do mimetype
+// enviado pelo cliente (que permitia servir HTML como se fosse PDF).
+const MIME_DOCUMENTO = {
+  ".pdf": "application/pdf",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+};
+
+function mimeDoDocumento(nome) {
+  const ext = String(nome || "").toLowerCase().match(/\.[a-z0-9]+$/)?.[0] || "";
+  return MIME_DOCUMENTO[ext] || "application/octet-stream";
+}
+
+function serializarDocumento(doc) {
+  const obj = doc.toJSON ? doc.toJSON() : doc;
+  delete obj.conteudo;
+  return obj;
+}
+
+// Procura um documento garantindo que a proposta pertence à organização.
+async function documentoDaOrganizacao(docId, organizacaoId) {
+  const doc = await PropostaDocumento.findOne({
+    where: { id: docId, organizacao_id: organizacaoId },
+  });
+  if (!doc) return null;
+  const proposta = await Proposta.findOne({
+    where: { id: doc.proposta_id, organizacao_id: organizacaoId },
+  });
+  return proposta ? doc : null;
+}
+
+exports.listarDocumentos = async (req, res) => {
+  try {
+    const proposta = await Proposta.findOne({
+      where: { id: req.params.id, organizacao_id: req.organizacao_id },
+    });
+    if (!proposta) return res.status(404).json({ erro: "Proposta não encontrada" });
+    const documentos = await PropostaDocumento.findAll({
+      where: { proposta_id: proposta.id, organizacao_id: req.organizacao_id },
+      attributes: { exclude: ["conteudo"] },
+      order: [["id", "DESC"]],
+    });
+    return res.json(documentos.map(serializarDocumento));
+  } catch (e) {
+    console.error("Erro ao listar documentos da proposta:", e);
+    return res.status(500).json({ erro: "Erro ao listar documentos" });
+  }
+};
+
+exports.anexarDocumentos = async (req, res) => {
+  try {
+    const proposta = await Proposta.findOne({
+      where: { id: req.params.id, organizacao_id: req.organizacao_id },
+    });
+    if (!proposta) return res.status(404).json({ erro: "Proposta não encontrada" });
+
+    const ficheiros = req.files || [];
+    if (!ficheiros.length) return res.status(400).json({ erro: "Nenhum ficheiro recebido" });
+
+    const autor = req.usuario?.nome || req.usuario?.email || "";
+    const criados = [];
+    for (const f of ficheiros) {
+      criados.push(await PropostaDocumento.create({
+        organizacao_id: req.organizacao_id,
+        proposta_id: proposta.id,
+        nome_original: f.originalname || "documento",
+        mime: f.mimetype || "",
+        tamanho: f.size || 0,
+        conteudo: f.buffer || null,
+        anexado_por: autor,
+      }));
+    }
+    await registarEvento(
+      proposta.id,
+      proposta.estado,
+      req.usuario.id,
+      `Anexou ${ficheiros.length} documento(s): ${ficheiros.map((f) => f.originalname).join(", ")}`
+    );
+    return res.status(201).json(criados.map(serializarDocumento));
+  } catch (e) {
+    console.error("Erro ao anexar documentos da proposta:", e);
+    return res.status(500).json({ erro: "Erro ao anexar documentos" });
+  }
+};
+
+exports.abrirDocumento = async (req, res) => {
+  try {
+    const doc = await documentoDaOrganizacao(req.params.docId, req.organizacao_id);
+    if (!doc) return res.status(404).json({ erro: "Documento não encontrado" });
+    if (!doc.conteudo || !doc.conteudo.length) {
+      return res.status(410).json({ erro: "Ficheiro indisponível (não existe cópia guardada)" });
+    }
+
+    const nomeSeguro = String(doc.nome_original || "documento").replace(/[^\w.\- ]+/g, "_");
+    const mime = mimeDoDocumento(nomeSeguro);
+    res.setHeader("Content-Type", mime);
+    res.setHeader("Content-Length", doc.conteudo.length);
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    const disposicao = mime === "application/octet-stream" ? "attachment" : "inline";
+    res.setHeader("Content-Disposition", `${disposicao}; filename*=UTF-8''${encodeURIComponent(nomeSeguro)}`);
+    return res.end(doc.conteudo);
+  } catch (e) {
+    console.error("Erro ao abrir documento da proposta:", e);
+    return res.status(500).json({ erro: "Erro ao abrir documento" });
+  }
+};
+
+// Um documento nunca é eliminado: fica no histórico marcado como anulado.
+exports.anularDocumento = async (req, res) => {
+  try {
+    const doc = await documentoDaOrganizacao(req.params.docId, req.organizacao_id);
+    if (!doc) return res.status(404).json({ erro: "Documento não encontrado" });
+    if (doc.anulado) return res.status(400).json({ erro: "Este documento já está anulado" });
+
+    await doc.update({
+      anulado: true,
+      anulado_em: new Date(),
+      anulado_por: req.usuario?.nome || req.usuario?.email || "",
+    });
+    await registarEvento(
+      doc.proposta_id,
+      (await Proposta.findByPk(doc.proposta_id))?.estado || "rascunho",
+      req.usuario.id,
+      `Anulou o documento "${doc.nome_original}"`
+    );
+    return res.json(serializarDocumento(doc));
+  } catch (e) {
+    console.error("Erro ao anular documento da proposta:", e);
+    return res.status(500).json({ erro: "Erro ao anular documento" });
+  }
 };

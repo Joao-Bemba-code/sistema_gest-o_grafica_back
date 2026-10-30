@@ -7,16 +7,31 @@ const loginLog = require("../services/loginLog");
 const suporteAuditoria = require("../services/suporteAuditoria");
 const { registarFalha, limparFalhas } = require("../protect/loginLimit");
 const totp = require("../services/totp");
-const { COOKIE_SESSAO } = require("../protect/suporteAuth");
+const { PERFIS } = require("../services/permissoes");
+const { COOKIE_SESSAO, tokenDoPedido } = require("../protect/suporteAuth");
+const { revogar } = require("../protect/tokenRevogados");
 
 const SEM_SENHA = { exclude: ["senha", "totp_secret"] };
-const COOKIE_OPTS = () => ({
-  httpOnly: true,
-  sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-  secure: process.env.NODE_ENV === "production",
-  maxAge: 8 * 60 * 60 * 1000,
-  path: "/",
-});
+
+function sameSiteCookie() {
+  const valor = String(process.env.COOKIE_SAMESITE || "lax").toLowerCase();
+  return ["lax", "strict", "none"].includes(valor) ? valor : "lax";
+}
+
+const COOKIE_OPTS = () => {
+  const sameSite = sameSiteCookie();
+  return {
+    httpOnly: true,
+    sameSite,
+    secure: sameSite === "none" || process.env.NODE_ENV === "production",
+    maxAge: 8 * 60 * 60 * 1000,
+    path: "/",
+  };
+};
+
+function perfilValido(perfil) {
+  return typeof perfil === "string" && Object.prototype.hasOwnProperty.call(PERFIS, perfil);
+}
 
 const CARACTERES_SENHA = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789!@#$%";
 
@@ -50,6 +65,9 @@ async function criarUsuarioDeOrg(organizacaoId, dados) {
   const { nome, email, senha, perfil, funcao, permissoes } = dados;
   if (!nome || !String(nome).trim() || !email || !String(email).trim()) {
     throw erroComStatus("Nome e email do utilizador são obrigatórios", 422);
+  }
+  if (perfil !== undefined && !perfilValido(perfil)) {
+    throw erroComStatus("Perfil inválido", 422);
   }
   const existe = await Usuario.findOne({ where: { email } });
   if (existe) throw erroComStatus("Já existe um utilizador com este email", 409);
@@ -111,9 +129,16 @@ exports.login = async (req, res) => {
       user_agent: req.headers?.["user-agent"] || null,
     });
     await suporteAuditoria.registar(req, "suporte.login", { tipo: "suporte_usuario", id: usuario.id }, { nome: usuario.nome });
-    const token = jwt.sign({ id: usuario.id, tipo: "suporte" }, process.env.SECRET_SUPORTE, {
-      expiresIn: "8h",
-    });
+    const token = jwt.sign(
+      {
+        id: usuario.id,
+        tipo: "suporte",
+        tv: Number(usuario.token_version || 0),
+        jti: crypto.randomUUID(),
+      },
+      process.env.SECRET_SUPORTE,
+      { expiresIn: "8h" }
+    );
     // Sessão principal via cookie HttpOnly; o token no corpo mantém-se apenas
     // como reserva para ambientes locais onde o browser não envia o cookie.
     res.cookie(COOKIE_SESSAO, token, COOKIE_OPTS());
@@ -125,6 +150,15 @@ exports.login = async (req, res) => {
 };
 
 exports.logout = (req, res) => {
+  try {
+    const token = tokenDoPedido(req);
+    if (token) {
+      const decoded = jwt.verify(token, process.env.SECRET_SUPORTE);
+      revogar(decoded.jti, decoded.exp);
+    }
+  } catch {
+    // token já inválido/expirado: nada a revogar
+  }
   res.clearCookie(COOKIE_SESSAO, { ...COOKIE_OPTS(), maxAge: undefined });
   return res.json({ mensagem: "Sessão terminada" });
 };
@@ -168,9 +202,16 @@ exports.totpConfirmar = async (req, res) => {
 
 exports.totpDesactivar = async (req, res) => {
   try {
-    const { senha } = req.body;
+    const { senha, codigo } = req.body;
     if (!senha || !(await bcrypt.compare(senha, req.suporte.senha))) {
       return res.status(401).json({ erro: "Senha incorrecta. Confirme a senha para desactivar o 2FA." });
+    }
+    // Exigir o código atual impede que uma sessão roubada desligue o 2FA.
+    if (req.suporte.totp_confirmado) {
+      const segredo = totp.decifrarSegredo(req.suporte.totp_secret);
+      if (!segredo || !totp.verificarCodigo(segredo, codigo)) {
+        return res.status(401).json({ erro: "Código de verificação inválido. Indique o código atual da app de autenticação." });
+      }
     }
     await req.suporte.update({ totp_secret: null, totp_confirmado: false });
     await suporteAuditoria.registar(req, "suporte.2fa_desactivar", { tipo: "suporte_usuario", id: req.suporte.id }, { activo: false });
@@ -429,17 +470,28 @@ exports.atualizarUsuario = async (req, res) => {
     const usuario = await Usuario.findByPk(req.params.id);
     if (!usuario) return res.status(404).json({ erro: "Utilizador não encontrado" });
     const { nome, email, perfil, funcao, permissoes, ativo, senha } = req.body || {};
+    if (perfil !== undefined && !perfilValido(perfil)) {
+      return res.status(422).json({ erro: "Perfil inválido" });
+    }
     const senhaReposta = !!(senha && String(senha).trim());
     const alterados = [];
+    let revogarSessoes = false;
     if (nome !== undefined) { usuario.nome = nome; alterados.push("nome"); }
-    if (email !== undefined) { usuario.email = email; alterados.push("email"); }
-    if (perfil !== undefined) { usuario.perfil = perfil; alterados.push("perfil"); }
+    if (email !== undefined) { usuario.email = email; alterados.push("email"); revogarSessoes = true; }
+    if (perfil !== undefined) { usuario.perfil = perfil; alterados.push("perfil"); revogarSessoes = true; }
     if (funcao !== undefined) { usuario.funcao = funcao; alterados.push("funcao"); }
-    if (permissoes !== undefined) { usuario.permissoes = permissoes; alterados.push("permissoes"); }
-    if (ativo !== undefined) { usuario.ativo = !!ativo; alterados.push("ativo"); }
+    if (permissoes !== undefined) { usuario.permissoes = permissoes; alterados.push("permissoes"); revogarSessoes = true; }
+    if (ativo !== undefined) { usuario.ativo = !!ativo; alterados.push("ativo"); revogarSessoes = true; }
     if (senhaReposta) {
       usuario.senha = await bcrypt.hash(senha, 10);
       alterados.push("senha");
+      revogarSessoes = true;
+    }
+    // Mudanças de identidade/permissões invalidam imediatamente as sessões
+    // antigas desse utilizador (o token deixa de bater com token_version).
+    if (revogarSessoes) {
+      usuario.token_version = Number(usuario.token_version || 0) + 1;
+      alterados.push("sessoes_revogadas");
     }
     await usuario.save();
     await suporteAuditoria.registar(

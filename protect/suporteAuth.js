@@ -1,5 +1,6 @@
 const jwt = require("jsonwebtoken");
 const { SuporteUsuario } = require("../models");
+const { estaRevogado } = require("./tokenRevogados");
 
 const COOKIE_SESSAO = "sigraf_suporte_token";
 
@@ -36,6 +37,12 @@ module.exports = async (req, res, next) => {
     if (!usuario || !usuario.ativo) {
       return res.status(401).json({ erro: "Conta de suporte inválida ou inativa" });
     }
+    if (estaRevogado(decoded.jti)) {
+      return res.status(401).json({ erro: "Sessão terminada. Entre novamente." });
+    }
+    if (Number(decoded.tv || 0) !== Number(usuario.token_version || 0)) {
+      return res.status(401).json({ erro: "Sessão expirada. Entre novamente." });
+    }
     req.suporte = usuario;
     next();
   } catch (e) {
@@ -44,3 +51,4 @@ module.exports = async (req, res, next) => {
 };
 
 module.exports.COOKIE_SESSAO = COOKIE_SESSAO;
+module.exports.tokenDoPedido = tokenDoPedido;

@@ -77,13 +77,24 @@ function includeOrdemSimples() {
   ];
 }
 
+// Carrega a OP garantindo que pertence à organização autenticada.
+// NUNCA usar OrdemProducao.findByPk com um id vindo do cliente: permitia
+// que uma empresa alterasse o estado/histórico da OP de outra (IDOR).
+async function ordemDaOrganizacao(ordemId, organizacaoId, transaction) {
+  if (ordemId === undefined || ordemId === null || ordemId === "") return null;
+  return OrdemProducao.findOne({
+    where: { id: ordemId, organizacao_id: organizacaoId },
+    transaction,
+  });
+}
+
 async function podeAvancar(ordemId, organizacaoId, transaction) {
   const total = await ReservaEstoque.count({
     where: { ordem_producao_id: ordemId, organizacao_id: organizacaoId },
     transaction,
   });
   if (total === 0) return true;
-  const op = await OrdemProducao.findByPk(ordemId, { transaction });
+  const op = await ordemDaOrganizacao(ordemId, organizacaoId, transaction);
   return op?.requisicao_estado === "libertada";
 }
 
@@ -94,8 +105,8 @@ function opFechada(ordem) {
   return ["finalizado", "entregue"].includes(ordem?.estado);
 }
 
-async function registarProcesso(ordemId, processo, dados) {
-  const op = await OrdemProducao.findByPk(ordemId);
+async function registarProcesso(ordemId, organizacaoId, processo, dados) {
+  const op = await ordemDaOrganizacao(ordemId, organizacaoId);
   if (!op) return;
   const hist = Array.isArray(op.historico_processos) ? [...op.historico_processos] : [];
   hist.push({
@@ -610,7 +621,7 @@ exports.finalizarProducao = async (req, res) => {
     });
     await ordem.update({ estado: "finalizado", progresso: 100 }, { transaction: t });
     await t.commit();
-    await registarProcesso(ordem.id, "qualidade", {
+    await registarProcesso(ordem.id, req.organizacao_id, "qualidade", {
       resultado: "aprovado",
       observacoes: "Produção finalizada diretamente",
     });
@@ -656,7 +667,7 @@ exports.reabrirOrdem = async (req, res) => {
       { transaction: t }
     );
     await t.commit();
-    await registarProcesso(ordem.id, "reabertura", {
+    await registarProcesso(ordem.id, req.organizacao_id, "reabertura", {
       resultado: "reaberta",
       estado_anterior: estadoAnterior,
       estado_atual: "em_producao",
@@ -711,6 +722,10 @@ exports.removerOrdem = async (req, res) => {
 exports.salvarPreImpressao = async (req, res) => {
   try {
     const { ordem_producao_id } = req.params;
+    const ordem = await ordemDaOrganizacao(ordem_producao_id, req.organizacao_id);
+    if (!ordem) {
+      return res.status(404).json({ erro: "Ordem de produção não encontrada" });
+    }
     const [pre, criado] = await PreImpressao.findOrCreate({
       where: { ordem_producao_id, organizacao_id: req.organizacao_id },
       defaults: { organizacao_id: req.organizacao_id, ordem_producao_id },
@@ -728,7 +743,7 @@ exports.salvarPreImpressao = async (req, res) => {
     const ok = campos.filter((c) => pre[c]).length;
     pre.resultado = ok === total ? "aprovado" : ok === 0 ? "pendente" : "reprovado";
     await pre.save();
-    const op = await OrdemProducao.findByPk(ordem_producao_id);
+    const op = ordem;
     if (op) {
       if (ok === total) {
         if (!(await podeAvancar(op.id, req.organizacao_id))) {
@@ -743,7 +758,7 @@ exports.salvarPreImpressao = async (req, res) => {
       } else {
         await op.update({ pre_impressao_ok: false });
       }
-      await registarProcesso(ordem_producao_id, "pre_impressao", {
+      await registarProcesso(ordem_producao_id, req.organizacao_id, "pre_impressao", {
         resultado: pre.resultado,
         responsavel: pre.responsavel || null,
         observacoes: pre.observacoes || null,
@@ -759,6 +774,10 @@ exports.salvarPreImpressao = async (req, res) => {
 exports.salvarImpressao = async (req, res) => {
   try {
     const { ordem_producao_id } = req.params;
+    const ordem = await ordemDaOrganizacao(ordem_producao_id, req.organizacao_id);
+    if (!ordem) {
+      return res.status(404).json({ erro: "Ordem de produção não encontrada" });
+    }
     if (!(await podeAvancar(ordem_producao_id, req.organizacao_id))) {
       return res.status(422).json({
         erro: "Os materiais desta OP ainda não foram libertados pelo estoque. Faça a saída dos materiais antes de registar a impressão.",
@@ -798,9 +817,12 @@ exports.salvarImpressao = async (req, res) => {
         { where: { ordem_producao_id: opId, organizacao_id: req.organizacao_id } }
       );
       const criados = await Impressao.bulkCreate(registos);
-      await OrdemProducao.update({ impressao_ok: true }, { where: { id: opId } });
+      await OrdemProducao.update(
+        { impressao_ok: true },
+        { where: { id: opId, organizacao_id: req.organizacao_id } }
+      );
       for (const imp of criados) {
-        await registarProcesso(opId, "impressao", {
+        await registarProcesso(opId, req.organizacao_id, "impressao", {
           maquina: imp.maquina || null,
           operador: imp.operador || null,
           data_inicio: imp.data_inicio || null,
@@ -836,8 +858,11 @@ exports.salvarImpressao = async (req, res) => {
       defaults: dados,
     });
     if (!criado) await imp.update(dados);
-    await OrdemProducao.update({ impressao_ok: true }, { where: { id: ordem_producao_id } });
-    await registarProcesso(ordem_producao_id, "impressao", {
+    await OrdemProducao.update(
+      { impressao_ok: true },
+      { where: { id: ordem_producao_id, organizacao_id: req.organizacao_id } }
+    );
+    await registarProcesso(ordem_producao_id, req.organizacao_id, "impressao", {
       maquina: imp.maquina || null,
       operador: imp.operador || null,
       data_inicio: imp.data_inicio || null,
@@ -858,6 +883,10 @@ exports.salvarImpressao = async (req, res) => {
 exports.salvarAcabamento = async (req, res) => {
   try {
     const { ordem_producao_id } = req.params;
+    const ordem = await ordemDaOrganizacao(ordem_producao_id, req.organizacao_id);
+    if (!ordem) {
+      return res.status(404).json({ erro: "Ordem de produção não encontrada" });
+    }
     const body = req.body || {};
     // Várias máquinas por OP: cada uma com o seu colaborador e tempo de
     // trabalho. Sem `maquinas`, mantém-se o caminho antigo (body.maquina).
@@ -924,10 +953,13 @@ exports.salvarAcabamento = async (req, res) => {
       const criados = await Acabamento.bulkCreate(items);
       // Aqui vale o que ficou gravado, não o que foi pedido.
       const todosConcluidos = criados.length > 0 && criados.every((c) => c.estado === "concluido");
-      await OrdemProducao.update({ acabamento_ok: todosConcluidos }, { where: { id: ordem_producao_id } });
+      await OrdemProducao.update(
+        { acabamento_ok: todosConcluidos },
+        { where: { id: ordem_producao_id, organizacao_id: req.organizacao_id } }
+      );
       const servicosEstado = Object.fromEntries(servicos.map((s) => [s.servico, s.estado || "pendente"]));
       for (const m of alvos) {
-        await registarProcesso(ordem_producao_id, "acabamento", {
+        await registarProcesso(ordem_producao_id, req.organizacao_id, "acabamento", {
           maquina: m.maquina || null,
           operador: m.operador || null,
           tempo_estimado: m.tempo_estimado || null,
@@ -949,6 +981,10 @@ exports.salvarAcabamento = async (req, res) => {
 exports.salvarQualidade = async (req, res) => {
   try {
     const { ordem_producao_id } = req.params;
+    const ordem = await ordemDaOrganizacao(ordem_producao_id, req.organizacao_id);
+    if (!ordem) {
+      return res.status(404).json({ erro: "Ordem de produção não encontrada" });
+    }
     const campos = ["cor", "corte", "quantidade", "acabamento", "embalagem"];
     const dados = {};
     campos.forEach((c) => {
@@ -965,7 +1001,7 @@ exports.salvarQualidade = async (req, res) => {
     const ok = campos.filter((c) => qual[c] === "aprovado").length;
     qual.resultado = ok === total ? "aprovado" : ok === 0 ? "pendente" : "reprovado";
     await qual.save();
-    const op = await OrdemProducao.findByPk(ordem_producao_id);
+    const op = ordem;
     if (op) {
       if (ok === total) {
         if (!(await podeAvancar(op.id, req.organizacao_id))) {
@@ -980,7 +1016,7 @@ exports.salvarQualidade = async (req, res) => {
       } else {
         await op.update({ qualidade_ok: false });
       }
-      await registarProcesso(ordem_producao_id, "qualidade", {
+      await registarProcesso(ordem_producao_id, req.organizacao_id, "qualidade", {
         resultado: qual.resultado,
         cor: qual.cor,
         corte: qual.corte,

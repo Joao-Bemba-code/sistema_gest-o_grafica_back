@@ -3,6 +3,8 @@ const cors = require("cors");
 const path = require("path");
 const fs = require("fs");
 const sanitize = require("./protect/sanitize");
+const auth = require("./protect/auth");
+const { limitar } = require("./protect/rateLimit");
 
 const UPLOADS = process.env.SIGRAF_UPLOADS || path.join(__dirname, "uploads");
 
@@ -12,23 +14,47 @@ fs.mkdirSync(UPLOADS, { recursive: true });
 // APP_ORIGINS=https://app.exemplo.com,https://admin.exemplo.com
 const ORIGENS = String(process.env.APP_ORIGINS || "")
   .split(",")
-  .map((o) => o.trim())
+  .map((o) => o.trim().replace(/\/+$/, ""))
   .filter(Boolean);
+
+// Fonte única de verdade para CORS e para a verificação anti-CSRF.
+// Em produção falha fechado: sem APP_ORIGINS configurado nenhuma origem de
+// browser é aceite (evita refletir qualquer origem com credenciais).
+function origemAutorizada(origem) {
+  if (!origem) return true; // sem Origin não é um pedido cross-origin de browser
+  const limpa = String(origem).replace(/\/+$/, "");
+  if (ORIGENS.length) return ORIGENS.includes(limpa);
+  return process.env.NODE_ENV !== "production";
+}
 
 function corsDaApi() {
   return cors({
     origin(origem, callback) {
-      // Sem Origin (curl, apps desktop, health check) não há CORS a aplicar.
-      if (!origem) return callback(null, true);
-      if (!ORIGENS.length) {
-        // Ainda não configurado: mantém o comportamento antigo para não
-        // bloquear a aplicação, mas avisa no arranque.
-        return callback(null, true);
-      }
-      return callback(null, ORIGENS.includes(origem));
+      return callback(null, origemAutorizada(origem));
     },
     credentials: true,
   });
+}
+
+// Verificação anti-CSRF baseada em Origin. O cookie de sessão é enviado
+// automaticamente pelo browser, por isso um formulário malicioso noutro site
+// poderia disparar POSTs autenticados. Só aceitamos métodos seguros, origens
+// autorizadas, ou (para clientes não-browser, ex.: desktop) pedidos sem Origin
+// que apresentem um Bearer token explícito.
+function verificarOrigem(req, res, next) {
+  const metodo = req.method.toUpperCase();
+  if (["GET", "HEAD", "OPTIONS"].includes(metodo)) return next();
+  const origem = req.get("origin");
+  if (origem) {
+    if (origemAutorizada(origem)) return next();
+    return res.status(403).json({ erro: "Origem não autorizada" });
+  }
+  // sem Origin: aceita apenas autenticação explícita por Bearer (apps desktop)
+  if (String(req.get("authorization") || "").toLowerCase().startsWith("bearer ")) {
+    return next();
+  }
+  if (!ORIGENS.length && process.env.NODE_ENV !== "production") return next();
+  return res.status(403).json({ erro: "Origem não autorizada" });
 }
 
 function cabecalhosSeguranca(req, res, next) {
@@ -64,6 +90,21 @@ function criarApp(opcoes = {}) {
     res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
     next();
   });
+  app.use(verificarOrigem);
+  // Limite global por IP para todas as rotas da API, como rede de segurança
+  // contra abuso/enumeração. Rotas sensíveis mantêm limites próprios.
+  app.use(
+    "/api",
+    limitar({
+      prefixo: "api",
+      limite: Number(process.env.API_RATE_LIMIT) || 1200,
+      janelaMs: 15 * 60 * 1000,
+    })
+  );
+
+  // Comprovativos de tesouraria não podem ser públicos: exigem sessão válida.
+  // Fica antes do static/proxy para que ninguém os descarregue por URL direto.
+  app.use("/uploads/tesouraria", auth);
 
   // Rota pública para testar se o servidor está a funcionar (deploy/health check).
   // Só é registada no servidor autónomo (deploy); o desktop usa a mesma app

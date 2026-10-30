@@ -1,4 +1,5 @@
-const { Cliente, ClienteDocumento } = require("../models");
+const { Cliente, ClienteDocumento, Auditoria, Usuario } = require("../models");
+const auditoria = require("../services/auditoria");
 
 // Tipo devolvido ao browser derivado da extensão guardada, nunca do mimetype
 // enviado pelo cliente (que permitia servir HTML como se fosse PDF).
@@ -107,6 +108,13 @@ exports.criar = async (req, res) => {
     if (!cliente.codigo) {
       await cliente.update({ codigo: gerarCodigo(cliente.tipo, cliente.id) });
     }
+    auditoria.registrar({
+      req,
+      acao: "cliente.criar",
+      alvoTipo: "cliente",
+      alvoId: cliente.id,
+      detalhe: `${cliente.tipo === "fornecedor" ? "Fornecedor" : "Cliente"} criado: ${cliente.nome}`,
+    });
     return res.status(201).json(serializar(cliente));
   } catch (e) {
     return res.status(500).json({ erro: "Erro ao criar cliente" });
@@ -120,10 +128,31 @@ exports.atualizar = async (req, res) => {
     });
     if (!cliente) return res.status(404).json({ erro: "Cliente não encontrado" });
     const dados = normalizarDados(req.body);
+    // Compara com os valores anteriores para descrever o que mudou no histórico.
+    const antes = cliente.toJSON ? cliente.toJSON() : cliente;
+    const rotulos = {
+      nome: "nome", nif: "NIF", telefone: "telefone", whatsapp: "WhatsApp", email: "email",
+      endereco: "morada", tipo_cliente: "tipo de cliente", categoria: "categoria",
+      setor_atividade: "sector", unidade_negocio: "unidade de negócio",
+      provincia: "província", municipio: "município", bairro: "bairro", ativo: "estado",
+      observacoes: "observações",
+    };
+    const alterados = Object.keys(dados).filter(
+      (k) => String(dados[k] ?? "") !== String(antes[k] ?? "")
+    );
     await cliente.update(dados);
     if (!cliente.codigo) {
       await cliente.update({ codigo: gerarCodigo(cliente.tipo, cliente.id) });
     }
+    auditoria.registrar({
+      req,
+      acao: "cliente.atualizar",
+      alvoTipo: "cliente",
+      alvoId: cliente.id,
+      detalhe: alterados.length
+        ? `Alterou: ${alterados.map((k) => rotulos[k] || k).join(", ")}`
+        : "Guardou sem alterações",
+    });
     return res.json(serializar(cliente));
   } catch (e) {
     return res.status(500).json({ erro: "Erro ao atualizar cliente" });
@@ -147,9 +176,67 @@ exports.anular = async (req, res) => {
       anulado_por: req.usuario?.nome || req.usuario?.email || "",
       data_anulacao: new Date(),
     });
+    auditoria.registrar({
+      req,
+      acao: "cliente.anular",
+      alvoTipo: "cliente",
+      alvoId: cliente.id,
+      detalhe: `Anulou o cadastro de ${cliente.nome}. Motivo: ${motivo}`,
+    });
     return res.json(serializar(cliente));
   } catch (e) {
     return res.status(500).json({ erro: "Erro ao anular cliente" });
+  }
+};
+
+// Histórico de auditoria do cliente: quem criou, alterou, anulou, anexou ou
+// anulou documentos. Registos mais recentes primeiro.
+exports.historico = async (req, res) => {
+  try {
+    const cliente = await Cliente.findOne({
+      where: { id: req.params.id, organizacao_id: req.organizacao_id },
+    });
+    if (!cliente) return res.status(404).json({ erro: "Cliente não encontrado" });
+    const registos = await Auditoria.findAll({
+      where: {
+        organizacao_id: req.organizacao_id,
+        alvo_tipo: "cliente",
+        alvo_id: cliente.id,
+      },
+      include: [{ model: Usuario, attributes: ["id", "nome", "email"] }],
+      order: [["id", "DESC"]],
+      limit: 200,
+    });
+    const lista = registos.map((r) => {
+      const obj = r.toJSON ? r.toJSON() : r;
+      return {
+        id: obj.id,
+        acao: obj.acao,
+        detalhe: obj.detalhe,
+        ip: obj.ip,
+        criado_em: obj.createdAt,
+        usuario: obj.usuario?.nome || obj.usuario?.email || "Sistema",
+      };
+    });
+    // Clientes criados antes da auditoria automática não têm registo de
+    // criação: compõe-se uma entrada a partir da data de cadastro, para o
+    // histórico mostrar sempre que o cliente foi cadastrado (quem criou, nesses
+    // casos antigos, não ficou registado).
+    if (!lista.some((r) => r.acao === "cliente.criar")) {
+      lista.push({
+        id: 0,
+        acao: "cliente.criar",
+        detalhe: "Cadastro criado (registado antes da auditoria automática)",
+        ip: null,
+        criado_em: cliente.data_cadastro || cliente.createdAt,
+        usuario: null,
+      });
+    }
+    lista.sort((a, b) => new Date(b.criado_em || 0) - new Date(a.criado_em || 0));
+    return res.json(lista);
+  } catch (e) {
+    console.error("Erro ao listar histórico do cliente:", e);
+    return res.status(500).json({ erro: "Erro ao listar histórico" });
   }
 };
 
@@ -206,6 +293,13 @@ exports.anexarDocumentos = async (req, res) => {
         anexado_por: autor,
       }));
     }
+    auditoria.registrar({
+      req,
+      acao: "cliente.documento.anexar",
+      alvoTipo: "cliente",
+      alvoId: cliente.id,
+      detalhe: `Anexou ${ficheiros.length} documento(s): ${ficheiros.map((f) => f.originalname).join(", ")}`,
+    });
     return res.status(201).json(criados.map(serializarDocumento));
   } catch (e) {
     console.error("Erro ao anexar documentos do cliente:", e);
@@ -248,6 +342,13 @@ exports.anularDocumento = async (req, res) => {
       anulado: true,
       anulado_em: new Date(),
       anulado_por: req.usuario?.nome || req.usuario?.email || "",
+    });
+    auditoria.registrar({
+      req,
+      acao: "cliente.documento.anular",
+      alvoTipo: "cliente",
+      alvoId: doc.cliente_id,
+      detalhe: `Anulou o documento "${doc.nome_original}"`,
     });
     return res.json(serializarDocumento(doc));
   } catch (e) {

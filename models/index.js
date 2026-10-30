@@ -42,6 +42,7 @@ const CaixaSessao = require("./CaixaSessao");
 const RateioCusto = require("./RateioCusto");
 const Proposta = require("./Proposta");
 const PropostaEvento = require("./PropostaEvento");
+const PropostaDocumento = require("./PropostaDocumento");
 const ClienteDocumento = require("./ClienteDocumento");
 
 SuporteUsuario.hasMany(SuporteAuditoria, { foreignKey: "suporte_usuario_id" });
@@ -242,6 +243,10 @@ Proposta.belongsTo(Orcamento, { foreignKey: "orcamento_id", as: "orcamento" });
 Proposta.hasMany(PropostaEvento, { foreignKey: "proposta_id", as: "eventos" });
 PropostaEvento.belongsTo(Proposta, { foreignKey: "proposta_id" });
 PropostaEvento.belongsTo(Usuario, { foreignKey: "usuario_id", as: "usuario" });
+Organizacao.hasMany(PropostaDocumento, { foreignKey: "organizacao_id" });
+PropostaDocumento.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
+Proposta.hasMany(PropostaDocumento, { foreignKey: "proposta_id", as: "documentos" });
+PropostaDocumento.belongsTo(Proposta, { foreignKey: "proposta_id" });
 
 module.exports = {
   sequelize,
@@ -288,5 +293,6 @@ module.exports = {
   RateioCusto,
   Proposta,
   PropostaEvento,
+  PropostaDocumento,
   ClienteDocumento,
 };

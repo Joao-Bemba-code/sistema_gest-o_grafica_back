@@ -139,10 +139,22 @@ async function aplicarMigracoesMysql(sequelize) {
   // ou as permissões mudam.
   await adicionar("usuario", "token_version", "INT NOT NULL DEFAULT 0");
 
-  // Utilizadores já existentes mantêm acesso total (perfil administrador) para
-  // não bloquear ninguém na primeira migração; o admin ajusta depois os perfis.
-  await sequelize.query(`UPDATE usuario SET perfil = 'admin' WHERE perfil IS NULL OR perfil = ''`);
-  console.log("MIGRAÇÃO: utilizadores existentes passaram a perfil 'admin'");
+  // O painel de suporte também revoga sessões ao alterar credenciais.
+  await adicionar("suporte_usuario", "token_version", "INT NOT NULL DEFAULT 0");
+
+  // NÃO promover automaticamente utilizadores sem perfil a administrador:
+  // era uma escalada de privilégios silenciosa. Apenas avisamos para revisão.
+  const semPerfil = await sequelize.query(
+    `SELECT COUNT(*) AS total FROM usuario WHERE perfil IS NULL OR perfil = ''`,
+    { type: sequelize.QueryTypes.SELECT }
+  );
+  const totalSemPerfil = Number(semPerfil?.[0]?.total || 0);
+  if (totalSemPerfil > 0) {
+    console.warn(
+      `[segurança] ${totalSemPerfil} utilizador(es) sem perfil definido. ` +
+        "Atribua um perfil explicitamente; até lá aplica-se o perfil 'producao'."
+    );
+  }
 
   // Auditoria de acessos: registo de tentativas de login (sucesso/falha) e dados
   // do dispositivo/IP de onde foi feito o acesso. A tabela é criada pela sync().
@@ -363,6 +375,25 @@ async function aplicarMigracoesMysql(sequelize) {
   await adicionar("proposta", "condicoes_pagamento", "VARCHAR(200) NULL");
   await adicionar("proposta", "prazo_entrega", "VARCHAR(100) NULL");
   await adicionar("proposta", "responsavel_comercial", "VARCHAR(150) NULL");
+
+  // Proposta comercial expandida (COM-PRO-02): identificação, especificação,
+  // condições de entrega e documentos & acessos.
+  await adicionar("proposta", "versao", "VARCHAR(20) NULL");
+  await adicionar("proposta", "tipo", "VARCHAR(100) NULL");
+  await adicionar("proposta", "origem", "VARCHAR(100) NULL");
+  await adicionar("proposta", "familia", "VARCHAR(100) NULL");
+  await adicionar("proposta", "produto", "VARCHAR(150) NULL");
+  await adicionar("proposta", "formato", "VARCHAR(100) NULL");
+  await adicionar("proposta", "quantidade", "VARCHAR(100) NULL");
+  await adicionar("proposta", "suporte", "VARCHAR(100) NULL");
+  await adicionar("proposta", "cores", "VARCHAR(100) NULL");
+  await adicionar("proposta", "acabamento", "VARCHAR(150) NULL");
+  await adicionar("proposta", "produtos", "JSON NULL");
+  await adicionar("proposta", "local_entrega", "VARCHAR(200) NULL");
+  await adicionar("proposta", "condicoes_entrega", "VARCHAR(200) NULL");
+  await adicionar("proposta", "observacoes", "TEXT NULL");
+  await adicionar("proposta", "estado_documental", "VARCHAR(50) NULL");
+  await adicionar("proposta", "modelo_documental", "VARCHAR(100) NULL");
   await adicionar("orcamento", "anulado", "TINYINT(1) NOT NULL DEFAULT 0");
   await adicionar("orcamento", "motivo_anulacao", "TEXT NULL");
   await adicionar("orcamento", "anulado_por", "VARCHAR(200) NULL");
@@ -422,4 +453,55 @@ async function prepararSchemaAntesSync(sequelize) {
   }
 }
 
-module.exports = { aplicarMigracoesMysql, prepararSchemaAntesSync };
+// Antes do sync({alter:true}): trata referências a registos pais apagados.
+// O alter tenta criar as chaves estrangeiras dos modelos e falha (errno 1452)
+// se alguma linha ainda apontar para um registo que já não existe — comum
+// depois de sincronizações entre computadores ou restauro de cópias.
+// Colunas que aceitam NULL: a referência é anulada (nada se apaga).
+// Colunas NOT NULL: apagam-se as linhas órfãs, tal como a FK ON DELETE
+// CASCADE faria quando o registo pai foi apagado.
+async function limparOrfaosFk(sequelize) {
+  for (const nome of Object.keys(sequelize.models)) {
+    const modelo = sequelize.models[nome];
+    for (const assoc of Object.values(modelo.associations || {})) {
+      if (assoc.associationType !== "BelongsTo") continue;
+      const tabela = assoc.source.tableName;
+      const coluna = assoc.foreignKey;
+      const pai = assoc.target.tableName;
+      const col = await sequelize
+        .query(
+          `SELECT IS_NULLABLE FROM information_schema.COLUMNS
+           WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '${tabela}'
+             AND COLUMN_NAME = '${coluna}'`,
+          { type: sequelize.QueryTypes.SELECT }
+        )
+        .catch(() => []);
+      if (!col.length) continue;
+      try {
+        if (col[0].IS_NULLABLE === "YES") {
+          const [res] = await sequelize.query(
+            `UPDATE \`${tabela}\` SET \`${coluna}\` = NULL
+             WHERE \`${coluna}\` IS NOT NULL
+               AND \`${coluna}\` NOT IN (SELECT id FROM \`${pai}\`)`
+          );
+          if (res && res.affectedRows > 0) {
+            console.log(`Limpeza: ${tabela}.${coluna} órfãos anulados (${res.affectedRows})`);
+          }
+        } else {
+          const [res] = await sequelize.query(
+            `DELETE FROM \`${tabela}\`
+             WHERE \`${coluna}\` IS NOT NULL
+               AND \`${coluna}\` NOT IN (SELECT id FROM \`${pai}\`)`
+          );
+          if (res && res.affectedRows > 0) {
+            console.log(`Limpeza: ${tabela} órfãos removidos (${res.affectedRows})`);
+          }
+        }
+      } catch (e) {
+        console.log(`Limpeza ${tabela}.${coluna} ignorada:`, e.message);
+      }
+    }
+  }
+}
+
+module.exports = { aplicarMigracoesMysql, prepararSchemaAntesSync, limparOrfaosFk };

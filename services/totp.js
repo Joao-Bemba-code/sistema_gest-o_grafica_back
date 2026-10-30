@@ -41,7 +41,13 @@ function base32Decode(texto) {
 }
 
 function chaveCifra() {
-  return crypto.createHash("sha256").update(process.env.SECRET_SUPORTE || "sigraf-suporte-local").digest();
+  const segredo = process.env.SECRET_SUPORTE;
+  if (!segredo) {
+    // Nunca usar uma chave fixa: permitiria decifrar os segredos TOTP de
+    // qualquer instalação que não definisse a variável.
+    throw new Error("SECRET_SUPORTE não configurado: não é possível cifrar/decifrar o segredo TOTP.");
+  }
+  return crypto.createHash("sha256").update(segredo).digest();
 }
 
 function cifrarSegredo(texto) {

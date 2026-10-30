@@ -2,6 +2,17 @@ const { DataTypes, Op } = require("sequelize");
 const sequelize = require("../config");
 const modelosReais = require("../models");
 const { Organizacao } = modelosReais;
+const { sanitizarHtml } = require("./htmlSeguro");
+
+// Margem tolerada para relógios de clientes adiantados. Timestamps muito no
+// futuro permitiriam "bloquear" um registo para sempre no Last-Write-Wins e
+// esconder alterações legítimas dos restantes computadores.
+const MARGEM_RELOGIO_MS = 5 * 60 * 1000;
+
+function timestampNoFuturo(valor) {
+  const t = Date.parse(valor);
+  return !Number.isNaN(t) && t > Date.now() + MARGEM_RELOGIO_MS;
+}
 
 // Tabelas sincronizaveis no servidor (MySQL) e respetivas colunas de negocio.
 // Convencao partilhada com o local:
@@ -61,6 +72,7 @@ async function upsert(tabela, orgId, registos) {
   let n = 0;
   for (const reg of registos || []) {
     if (!reg || reg.id == null) continue;
+    if (timestampNoFuturo(reg.updated_at)) continue;
     const novoT = Date.parse(reg.updated_at) || 0;
     const existe = await Model.findOne({ where: { id: reg.id, org_id: orgId } });
     if (!existe) {
@@ -100,12 +112,20 @@ async function inicializarSincronizacao() {
 async function sincronizarOrganizacao(orgId, dados) {
   const org = await Organizacao.findByPk(orgId);
   if (!org) throw new Error("Organização não encontrada");
-  const novoT = Date.parse((dados && (dados.updated_at || dados.updatedAt)) || "") || 0;
+  const recebido = (dados && (dados.updated_at || dados.updatedAt)) || "";
+  if (timestampNoFuturo(recebido)) {
+    const erro = new Error("Timestamp de sincronização inválido");
+    erro.status = 422;
+    throw erro;
+  }
+  const novoT = Date.parse(recebido) || 0;
   const atualT = Date.parse(org.updatedAt) || 0;
   if (novoT && novoT <= atualT) return { ok: true, atualizado: false, updated_at: org.updatedAt };
   const campos = {};
   for (const c of COLUNAS_ORG) {
-    if (dados && dados[c] !== undefined && dados[c] !== null) campos[c] = String(dados[c]);
+    if (dados && dados[c] !== undefined && dados[c] !== null) {
+      campos[c] = c === "template_contrato" ? sanitizarHtml(String(dados[c])) : String(dados[c]);
+    }
   }
   if (novoT) campos.updatedAt = new Date(novoT);
   let atualizado = false;
@@ -218,6 +238,7 @@ async function upsertReal(tabela, orgId, registos) {
   let n = 0;
   for (const reg of registos || []) {
     if (!reg || reg.id == null) continue;
+    if (timestampNoFuturo(reg.updated_at || reg.updatedAt)) continue;
     const novoT = Date.parse(reg.updated_at || reg.updatedAt) || 0;
     const valores = {};
     for (const c of colunas) {

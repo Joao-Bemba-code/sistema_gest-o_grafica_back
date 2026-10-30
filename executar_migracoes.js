@@ -25,6 +25,10 @@ async function migrar() {
     }
   }
 
+  // Limpar referências órfãs antes do alter para a criação das FKs não falhar.
+  const { limparOrfaosFk } = require("./migrarMysql");
+  await limparOrfaosFk(sequelize);
+
   // Fallback: sync alter para garantir consistencia
   console.log("Sincronizando modelos com o banco (alter)...");
   await sequelize.sync({ alter: true });

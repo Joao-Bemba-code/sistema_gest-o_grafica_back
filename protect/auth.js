@@ -1,5 +1,6 @@
 const jwt = require("jsonwebtoken");
 const { Usuario } = require("../models");
+const { estaRevogado } = require("./tokenRevogados");
 
 const COOKIE_SESSAO = "sigraf_token";
 
@@ -25,6 +26,15 @@ module.exports = async (req, res, next) => {
   }
   try {
     const decoded = jwt.verify(token, process.env.SECRET);
+    // Só tokens emitidos para a aplicação. O claim `tipo` impede que um token
+    // de suporte (outro secret) ou qualquer token futuro sem esta marca seja
+    // aceite como sessão de utilizador.
+    if (decoded.tipo !== "app") {
+      return res.status(401).json({ erro: "Token inválido para esta aplicação" });
+    }
+    if (estaRevogado(decoded.jti)) {
+      return res.status(401).json({ erro: "Sessão terminada. Entre novamente." });
+    }
     const usuario = await Usuario.findByPk(decoded.id, { attributes: { exclude: ["senha"] } });
     if (!usuario || !usuario.ativo) {
       return res.status(401).json({ erro: "Usuário inválido ou inativo" });
@@ -43,3 +53,4 @@ module.exports = async (req, res, next) => {
 };
 
 module.exports.COOKIE_SESSAO = COOKIE_SESSAO;
+module.exports.tokenDoPedido = tokenDoPedido;

@@ -39,7 +39,8 @@ router.get("/zip", async (req, res) => {
       }
     });
   } catch (e) {
-    res.status(500).json({ erro: e.message || "Falha ao gerar o backup" });
+    console.error("Erro ao gerar backup global:", e);
+    res.status(500).json({ erro: "Falha ao gerar o backup" });
   }
 });
 

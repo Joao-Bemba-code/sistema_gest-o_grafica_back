@@ -75,10 +75,14 @@ async function proximoNumero(organizacao_id) {
   });
 }
 
-async function carregarMateriaisPorId(ids) {
+async function carregarMateriaisPorId(ids, organizacaoId) {
   const unicos = [...new Set(ids.filter(Boolean).map(String))];
   if (!unicos.length) return {};
-  const materiais = await Material.findAll({ where: { id: unicos } });
+  // Sem filtro de organização, um pedido podia usar materiais (nome, preço,
+  // unidade) de outra empresa.
+  const materiais = await Material.findAll({
+    where: { id: unicos, organizacao_id: organizacaoId },
+  });
   const mapa = {};
   materiais.forEach((m) => {
     mapa[String(m.id)] = m;
@@ -125,7 +129,10 @@ exports.criar = async (req, res) => {
       await t.rollback();
       return res.status(422).json({ erro: "Informe o fornecedor do pedido" });
     }
-    const materiaisPorId = await carregarMateriaisPorId((itens || []).map((i) => i.material_id));
+    const materiaisPorId = await carregarMateriaisPorId(
+      (itens || []).map((i) => i.material_id),
+      req.organizacao_id
+    );
     const normalizados = normalizarItens(itens, materiaisPorId);
     if (!normalizados.length) {
       await t.rollback();

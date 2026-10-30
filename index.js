@@ -36,6 +36,10 @@ const PORTA = process.env.port || 8000;
              AND orcamento_id NOT IN (SELECT id FROM orcamento)`
         );
       } catch {}
+      // Referências a registos apagados (categoria_id, fatura_id, ...)
+      // impedem o sync({alter:true}) de criar as chaves estrangeiras.
+      const { limparOrfaosFk } = require("./migrarMysql");
+      await limparOrfaosFk(sequelize);
     } catch (e) {
       console.error("Erro na preparação pré-sync:", e.message);
     }

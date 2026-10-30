@@ -1,17 +1,28 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
 const { Usuario, Organizacao } = require("../models");
 const { registarFalha, limparFalhas } = require("../protect/loginLimit");
 const loginLog = require("../services/loginLog");
-const { COOKIE_SESSAO } = require("../protect/auth");
+const { COOKIE_SESSAO, tokenDoPedido } = require("../protect/auth");
+const { revogar } = require("../protect/tokenRevogados");
 
-const COOKIE_OPTS = () => ({
-  httpOnly: true,
-  sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-  secure: process.env.NODE_ENV === "production",
-  maxAge: 8 * 60 * 60 * 1000,
-  path: "/",
-});
+function sameSiteCookie() {
+  const valor = String(process.env.COOKIE_SAMESITE || "lax").toLowerCase();
+  return ["lax", "strict", "none"].includes(valor) ? valor : "lax";
+}
+
+const COOKIE_OPTS = () => {
+  const sameSite = sameSiteCookie();
+  return {
+    httpOnly: true,
+    sameSite,
+    // SameSite=None exige Secure em todos os browsers.
+    secure: sameSite === "none" || process.env.NODE_ENV === "production",
+    maxAge: 8 * 60 * 60 * 1000,
+    path: "/",
+  };
+};
 
 function emitirToken(usuario) {
   return jwt.sign(
@@ -21,6 +32,8 @@ function emitirToken(usuario) {
       funcao: usuario.funcao,
       perfil: usuario.perfil,
       tv: Number(usuario.token_version || 0),
+      tipo: "app",
+      jti: crypto.randomUUID(),
     },
     process.env.SECRET,
     { expiresIn: "8h" }
@@ -91,6 +104,17 @@ exports.login = async (req, res) => {
 };
 
 exports.logout = (req, res) => {
+  // Invalida o token imediatamente (não basta apagar o cookie: um token
+  // roubado continuaria válido até expirar).
+  try {
+    const token = tokenDoPedido(req);
+    if (token) {
+      const decoded = jwt.verify(token, process.env.SECRET);
+      revogar(decoded.jti, decoded.exp);
+    }
+  } catch {
+    // token já inválido/expirado: nada a revogar
+  }
   res.clearCookie(COOKIE_SESSAO, { ...COOKIE_OPTS(), maxAge: undefined });
   return res.json({ mensagem: "Sessão terminada" });
 };
@@ -109,10 +133,13 @@ exports.perfil = async (req, res) => {
 
 exports.registrar = async (req, res) => {
   try {
-    // Fase 0 do relatório de segurança: enquanto o onboarding não estiver
-    // pronto, o operador pode desligar o registo público com
-    // SIGRAF_REGISTRO_PUBLICO=false (produção). Localmente continua aberto.
-    if (process.env.SIGRAF_REGISTRO_PUBLICO === "false") {
+    // Registo público fechado por omissão em produção. Só é aberto com
+    // SIGRAF_REGISTRO_PUBLICO=true (onboarding controlado); fora de produção
+    // continua aberto salvo configuração explícita em contrário.
+    const registoPublico =
+      process.env.SIGRAF_REGISTRO_PUBLICO === "true" ||
+      (process.env.NODE_ENV !== "production" && process.env.SIGRAF_REGISTRO_PUBLICO !== "false");
+    if (!registoPublico) {
       return res.status(403).json({
         erro: "O registo público está desativado. Contacte o suporte para criar a sua conta.",
       });
