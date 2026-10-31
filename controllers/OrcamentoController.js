@@ -50,6 +50,8 @@ function normalizarDados(body) {
   if (body.estado) dados.estado = body.estado;
   if (body.validade != null) dados.validade = body.validade;
   if (body.data_emissao) dados.data_emissao = body.data_emissao;
+  if (body.entrega_ok !== undefined) dados.entrega_ok = Boolean(body.entrega_ok);
+  if (body.data_entrega) dados.data_entrega = String(body.data_entrega).slice(0, 10);
   Object.keys(dados).forEach((k) => {
     if (dados[k] === undefined) delete dados[k];
   });
@@ -190,6 +192,8 @@ function serializar(o) {
     data: o.data_emissao,
     validade: o.validade,
     estado: o.estado,
+    entrega_ok: Boolean(o.entrega_ok),
+    data_entrega: o.data_entrega ? String(o.data_entrega).slice(0, 10) : null,
     cliente: {
       id: cli.id,
       nome: cli.nome || "",

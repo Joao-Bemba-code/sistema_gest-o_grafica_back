@@ -398,6 +398,9 @@ async function aplicarMigracoesMysql(sequelize) {
   await adicionar("orcamento", "motivo_anulacao", "TEXT NULL");
   await adicionar("orcamento", "anulado_por", "VARCHAR(200) NULL");
   await adicionar("orcamento", "data_anulacao", "DATETIME NULL");
+  // Entrega manual de encomendas que não passam por produção.
+  await adicionar("orcamento", "entrega_ok", "TINYINT(1) NOT NULL DEFAULT 0");
+  await adicionar("orcamento", "data_entrega", "DATE NULL");
 
   // Estado 'anulado' no ENUM dos orçamentos.
   const orcEstRef = await sequelize.query(

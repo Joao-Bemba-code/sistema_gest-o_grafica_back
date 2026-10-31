@@ -8,6 +8,8 @@ const Orcamento = sequelize.define("orcamento", {
   numero: { type: DataTypes.STRING(30), allowNull: false },
   data_emissao: { type: DataTypes.DATEONLY, defaultValue: DataTypes.NOW },
   validade: { type: DataTypes.INTEGER, defaultValue: 30 },
+  entrega_ok: { type: DataTypes.BOOLEAN, defaultValue: false },
+  data_entrega: { type: DataTypes.DATEONLY, allowNull: true },
   estado: { type: DataTypes.ENUM("pendente", "aprovado", "cancelado", "rejeitado", "anulado"), defaultValue: "pendente" },
   produto: { type: DataTypes.STRING(200) },
   formato: { type: DataTypes.STRING(100) },
