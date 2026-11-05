@@ -1,4 +1,4 @@
-const { sequelize, RequisicaoMaterial, RequisicaoMaterialItem, Cliente, Material, MovimentoEstoque, Sequencia } = require("../models");
+const { sequelize, RequisicaoMaterial, RequisicaoMaterialItem, Cliente, Material, MovimentoEstoque, Sequencia, OrdemProducao } = require("../models");
 const { Transaction } = require("sequelize");
 const { pode } = require("../services/permissoes");
 const notificacoesService = require("../services/notificacoes");
@@ -37,6 +37,38 @@ async function proximoNumero(organizacao_id, t) {
   return `KREQ-${String(novo).padStart(4, "0")}`;
 }
 
+// A aprovação de uma requisição de material só acontece depois de o Estoque
+// dizer quem preparou a recolha, quem a entregou, quem a recebeu e a data/hora
+// da saída. Devolve { erro } quando falta alguma dessas peças, para a mensagem
+// chegar ao utilizador antes de sequer tocar no stock.
+function lerPreparacao(body = {}) {
+  const preparado = String(body.preparado_por || "").trim().slice(0, 200);
+  const entregue = String(body.entregue_por || "").trim().slice(0, 200);
+  const recebido = String(body.recebido_por || "").trim().slice(0, 200);
+  const data = String(body.data || "").trim();
+  const hora = String(body.hora || "").trim();
+
+  const faltam = [];
+  if (!preparado) faltam.push("quem preparou");
+  if (!entregue) faltam.push("quem entregou");
+  if (!recebido) faltam.push("quem recebeu");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(data)) faltam.push("a data");
+  if (!/^(\d{1,2}):(\d{2})$/.test(hora)) faltam.push("a hora");
+  if (faltam.length) return { erro: `Para aprovar indica: ${faltam.join(", ")}.` };
+
+  const [hh, mm] = hora.split(":").map((n) => Number(n));
+  if (hh > 23 || mm > 59) return { erro: "Hora inválida — usa o formato 24 horas (ex.: 14:30)." };
+  const quando = new Date(`${data}T${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}:00`);
+  if (Number.isNaN(quando.getTime())) return { erro: "Data inválida." };
+
+  return {
+    preparado_por: preparado,
+    entregue_por: entregue,
+    recebido_por: recebido,
+    entregue_em: quando,
+  };
+}
+
 function serializar(r) {
   const itens = (r.itens || []).map((i) => ({
     id: i.id,
@@ -52,12 +84,18 @@ function serializar(r) {
   return {
     id: r.id,
     numero: r.numero,
+    ordem_producao_id: r.ordem_producao_id || null,
+    ordem_producao_numero: r.ordem_producao?.numero || null,
     cliente_id: r.cliente_id,
     cliente_nome: r.cliente_nome,
     estado: r.estado,
     observacoes: r.observacoes,
     solicitado_por: r.solicitado_por,
     aprovado_por: r.aprovado_por,
+    preparado_por: r.preparado_por || "",
+    entregue_por: r.entregue_por || "",
+    recebido_por: r.recebido_por || "",
+    entregue_em: r.entregue_em || null,
     data_requisicao: r.data_requisicao || r.createdAt,
     data_aprovacao: r.data_aprovacao,
     motivo_rejeicao: r.motivo_rejeicao || "",
@@ -69,6 +107,12 @@ function serializar(r) {
 const INCLUDE = [
   { model: RequisicaoMaterialItem, as: "itens", required: false },
   { model: Cliente, as: "cliente", required: false },
+  {
+    model: OrdemProducao,
+    as: "ordem_producao",
+    required: false,
+    attributes: ["id", "numero", "produto", "quantidade", "estado"],
+  },
 ];
 
 // Opções mínimas para o formulário da produção. Evita expor todo o cadastro
@@ -78,7 +122,7 @@ exports.auxiliares = async (req, res) => {
     if (gereStock(req.usuario)) {
       return res.status(422).json({ erro: "O formulário de requisição é do pessoal da produção. O stock aprova ou rejeita os pedidos." });
     }
-    const [clientes, materiais] = await Promise.all([
+    const [clientes, materiais, ordens] = await Promise.all([
       Cliente.findAll({
         where: { organizacao_id: req.organizacao_id, tipo: "cliente", ativo: true },
         attributes: ["id", "nome", "empresa"],
@@ -89,10 +133,27 @@ exports.auxiliares = async (req, res) => {
         attributes: ["id", "codigo", "nome", "unidade", "quantidade", "estoque_reservado"],
         order: [["nome", "ASC"]],
       }),
+      // A requisição é sempre feita a partir de uma ordem de produção aberta.
+      OrdemProducao.findAll({
+        where: { organizacao_id: req.organizacao_id, estado: ["aguardando", "em_producao"] },
+        attributes: ["id", "numero", "produto", "quantidade", "cliente_id", "estado"],
+        include: [{ model: Cliente, required: false, attributes: ["id", "nome", "empresa"] }],
+        order: [["createdAt", "DESC"]],
+      }),
     ]);
 
     return res.json({
       clientes: clientes.map((c) => ({ id: c.id, nome: c.nome, empresa: c.empresa || "" })),
+      ordens: ordens.map((o) => ({
+        id: o.id,
+        numero: o.numero,
+        produto: o.produto || "",
+        quantidade: Number(o.quantidade) || 0,
+        estado: o.estado,
+        cliente_id: o.cliente_id || null,
+        cliente_nome: o.cliente?.nome || SEM_CLIENTE,
+        cliente_empresa: o.cliente?.empresa || "",
+      })),
       materiais: materiais.map((m) => {
         const quantidade = Number(m.quantidade) || 0;
         const reservado = Number(m.estoque_reservado) || 0;
@@ -115,10 +176,11 @@ exports.auxiliares = async (req, res) => {
 
 exports.listar = async (req, res) => {
   try {
-    const { estado, cliente_id } = req.query || {};
+    const { estado, cliente_id, ordem_producao_id } = req.query || {};
     const where = { organizacao_id: req.organizacao_id };
     if (estado) where.estado = estado;
     if (cliente_id) where.cliente_id = cliente_id;
+    if (ordem_producao_id) where.ordem_producao_id = ordem_producao_id;
     const requisicoes = await RequisicaoMaterial.findAll({
       where,
       include: INCLUDE,
@@ -139,20 +201,27 @@ exports.criar = async (req, res) => {
       return res.status(422).json({ erro: "As requisições são criadas pelo pessoal da produção. O stock deve aprovar ou rejeitar o pedido." });
     }
     const b = req.body || {};
-    // Cliente opcional: material acabado e consumo interno na fábrica não têm
-    // cliente associado. Só se valida quando foi indicado.
-    const clienteId = Number(b.cliente_id);
-    let cliente = null;
-    if (clienteId && Number.isInteger(clienteId)) {
-      cliente = await Cliente.findOne({
-        where: { id: clienteId, organizacao_id: req.organizacao_id, tipo: "cliente", ativo: true },
-        transaction: t,
-      });
-      if (!cliente) {
-        await t.rollback();
-        return res.status(422).json({ erro: "Seleccione um cliente válido" });
-      }
+    // A requisição é feita com base numa ordem de produção: é a OP que define o
+    // cliente e o destino do material. O cliente não é escolhido à parte.
+    const ordemId = Number(b.ordem_producao_id);
+    if (!Number.isInteger(ordemId) || ordemId <= 0) {
+      await t.rollback();
+      return res.status(422).json({ erro: "Selecione a ordem de produção a que se destina a requisição" });
     }
+    const ordem = await OrdemProducao.findOne({
+      where: { id: ordemId, organizacao_id: req.organizacao_id },
+      include: [{ model: Cliente, required: false }],
+      transaction: t,
+    });
+    if (!ordem) {
+      await t.rollback();
+      return res.status(422).json({ erro: "Seleccione uma ordem de produção válida" });
+    }
+    if (["finalizado", "entregue"].includes(ordem.estado)) {
+      await t.rollback();
+      return res.status(422).json({ erro: "A ordem de produção já está fechada e não admite novas requisições de material" });
+    }
+    const cliente = ordem.cliente || null;
     const brutos = (Array.isArray(b.itens) ? b.itens : []).filter((i) => i && i.material_id);
     if (!brutos.length) {
       await t.rollback();
@@ -207,6 +276,7 @@ exports.criar = async (req, res) => {
       {
         numero,
         organizacao_id: req.organizacao_id,
+        ordem_producao_id: ordem.id,
         cliente_id: cliente ? cliente.id : null,
         cliente_nome: cliente ? cliente.nome : SEM_CLIENTE,
         estado: "pendente",
@@ -243,7 +313,7 @@ exports.criar = async (req, res) => {
         nivel: "warning",
         icone: "pending_actions",
         titulo: `Requisição de material ${numero}`,
-        descricao: `${requisicao.solicitado_por || "Produção"} requisitou ${porMaterial.size} material(is) para ${cliente ? cliente.nome : "consumo interno"}. Aguarda aprovação.`,
+        descricao: `${requisicao.solicitado_por || "Produção"} requisitou ${porMaterial.size} material(is) para a OP ${ordem.numero || ordem.id}${cliente ? ` · ${cliente.nome}` : " · consumo interno"}. Aguarda aprovação.`,
         link: "/estoque",
         usuarioId: req.usuario?.id || null,
       });
@@ -263,6 +333,10 @@ exports.criar = async (req, res) => {
 };
 
 exports.aprovar = async (req, res) => {
+  // Primeiro os dados da preparação/entrega: se faltarem, o stock não é tocado.
+  const preparacao = lerPreparacao(req.body || {});
+  if (preparacao.erro) return res.status(422).json({ erro: preparacao.erro });
+
   const t = await sequelize.transaction();
   try {
     const requisicao = await RequisicaoMaterial.findOne({
@@ -329,19 +403,24 @@ exports.aprovar = async (req, res) => {
           motivo: `Requisição de material ${requisicao.numero} aprovada`,
           cliente_nome: requisicao.cliente_nome,
           solicitado_por: requisicao.solicitado_por,
-          permitido_por: req.body?.permitido_por || req.usuario?.nome || null,
+          permitido_por: preparacao.entregue_por,
+          observacoes: `Preparado por ${preparacao.preparado_por} · entregue por ${preparacao.entregue_por} · recebido por ${preparacao.recebido_por}`,
           usuario_id: req.usuario?.id || null,
         },
         { transaction: t }
       );
       await item.update({ quantidade_atendida: qtd }, { transaction: t });
     }
-    const aprovadoPor = req.body?.aprovado_por || req.usuario?.nome || null;
+    const aprovadoPor = req.usuario?.nome || null;
     await requisicao.update(
       {
         estado: "aprovada",
         aprovado_por: aprovadoPor,
         data_aprovacao: new Date(),
+        preparado_por: preparacao.preparado_por,
+        entregue_por: preparacao.entregue_por,
+        recebido_por: preparacao.recebido_por,
+        entregue_em: preparacao.entregue_em,
       },
       { transaction: t }
     );
@@ -353,7 +432,7 @@ exports.aprovar = async (req, res) => {
         nivel: "success",
         icone: "inventory",
         titulo: `Requisição de material ${requisicao.numero} aprovada`,
-        descricao: `${itens.length} material(is) para ${requisicao.cliente_nome} com saída registada por ${aprovadoPor || "Estoque"}.`,
+        descricao: `${itens.length} material(is) para ${requisicao.cliente_nome} — preparado por ${preparacao.preparado_por}, entregue por ${preparacao.entregue_por}, recebido por ${preparacao.recebido_por}.`,
         link: "/producao",
         usuarioId: req.usuario?.id || null,
       });

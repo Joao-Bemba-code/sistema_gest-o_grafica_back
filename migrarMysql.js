@@ -190,6 +190,16 @@ async function aplicarMigracoesMysql(sequelize) {
     console.log("MIGRAÇÃO: requisicao_material.cliente_id aceita NULL");
   }
 
+  // Toda a requisição de material passa a estar ligada a uma ordem de produção.
+  // Registos antigos ficam sem OP (NULL) até serem associados manualmente.
+  await adicionar("requisicao_material", "ordem_producao_id", "INT NULL");
+
+  // Aprovação passa a registar quem preparou, quem entregou e a data/hora da saída.
+  await adicionar("requisicao_material", "preparado_por", "VARCHAR(200) NULL");
+  await adicionar("requisicao_material", "entregue_por", "VARCHAR(200) NULL");
+  await adicionar("requisicao_material", "recebido_por", "VARCHAR(200) NULL");
+  await adicionar("requisicao_material", "entregue_em", "DATETIME NULL");
+
   await adicionar("orcamento_servico", "servico_id", "INT NULL");
 
   // Cobrança proporcional de folha por encaixe no orçamento (ex.: usar A7 numa A4).
