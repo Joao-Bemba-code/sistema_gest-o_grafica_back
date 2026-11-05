@@ -157,6 +157,7 @@ function criarApp(opcoes = {}) {
     app.use("/api/pedidos", require("./routers/pedidos"));
   app.use("/api/requisicoes-material", require("./routers/requisicoes-material"));
     app.use("/api/servicos", require("./routers/servicos"));
+    app.use("/api/servicos-executados", require("./routers/servicos-executados"));
     app.use("/api/maquinas", require("./routers/maquinas"));
     app.use("/api/backup", require("./routers/backup"));
     app.use("/api/notificacoes", require("./routers/notificacoes"));
