@@ -6,8 +6,10 @@ const requirePermissao = require("../protect/perm");
 router.use(auth);
 
 // A página de Relatórios usa as ordens sem exigir acesso ao módulo de
-// Produção: quem pode ver relatórios pode ler esta lista.
-router.get("/ordens", requirePermissao.requireQualquerPermissao([["producao", "ver"], ["relatorios", "ver"]]), ProducaoController.listarOrdens);
+// Produção: quem pode ver relatórios pode ler esta lista. A aba Encomendas do
+// Comercial também lê as OPs para mostrar o estado de cada encomenda, por isso
+// quem tem acesso comercial pode listar (só listar) as ordens de produção.
+router.get("/ordens", requirePermissao.requireQualquerPermissao([["producao", "ver"], ["relatorios", "ver"], ["comercial", "ver"]]), ProducaoController.listarOrdens);
 router.get("/ordens/:id", requirePermissao("producao", "ver"), ProducaoController.buscarOrdem);
 router.post("/ordens", requirePermissao("producao", "criar"), ProducaoController.criarOrdem);
 router.put("/ordens/:id", requirePermissao("producao", "editar"), ProducaoController.atualizarOrdem);
