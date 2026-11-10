@@ -1,4 +1,4 @@
-const { sequelize, Material, MovimentoEstoque, Categoria, ReservaEstoque, OrdemProducao } = require("../models");
+const { sequelize, Material, MovimentoEstoque, Categoria, ReservaEstoque, OrdemProducao, TesourariaMovimento } = require("../models");
 const estoqueService = require("../services/estoque");
 const { prefixoK, nomeCategoriaDosDados } = require("../services/codigoArtigo");
 
@@ -265,6 +265,41 @@ exports.movimentar = async (req, res) => {
       },
       { transaction: t }
     );
+    // Consumo interno é despesa da empresa: a baixa gera uma saída na
+    // tesouraria pelo custo do material, para contar nas despesas e nos
+    // relatórios. Não há dinheiro a sair de nenhuma conta bancária, por isso o
+    // movimento fica sem conta associada e com a referência do movimento de stock.
+    const baixaInterna =
+      tipo === "saida" &&
+      (consumoInterno ||
+        String(motivo || "").startsWith("Requisição interna:") ||
+        String(cliente_nome || "").trim() === "Consumo interno");
+    if (baixaInterna) {
+      const valor = Number((parseFloat(material.custo_unit || 0) * qtd).toFixed(2));
+      // Sem custo unitário não há despesa a registar: evita linhas de 0 Kz.
+      if (valor > 0) {
+        const sector = String(motivo || "").replace(/^Requisição interna:\s*/, "").trim();
+        const agora = new Date();
+        await TesourariaMovimento.create(
+          {
+            organizacao_id: req.organizacao_id,
+            usuario_id: req.usuario.id,
+            tipo: "saida",
+            categoria: "despesa",
+            descricao: `Consumo interno — ${material.nome} (${qtd} ${material.unidade || "un"})${
+              sector && sector !== "Consumo interno" ? ` · ${sector}` : ""
+            }`.slice(0, 300),
+            valor,
+            data_movimento: agora.toISOString().split("T")[0],
+            hora_movimento: agora.toTimeString().split(" ")[0],
+            referencia_tipo: "outro",
+            referencia_id: movimento.id,
+            observacoes: `Baixa de stock interna (movimento #${movimento.id})`,
+          },
+          { transaction: t }
+        );
+      }
+    }
     await t.commit();
     return res.status(201).json({ material: serializar(material), movimento });
   } catch (e) {
