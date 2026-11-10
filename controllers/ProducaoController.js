@@ -1,6 +1,7 @@
 const { sequelize, OrdemProducao, PreImpressao, Impressao, Acabamento, Qualidade, Cliente, Orcamento, OrcamentoItem, OrcamentoMaterial, OrcamentoServico, ReservaEstoque, Maquina, Material } = require("../models");
 const estoqueService = require("../services/estoque");
 const notificacoesService = require("../services/notificacoes");
+const requisicoesMaterialService = require("../services/requisicoesMaterial");
 
 const ESTADOS_ORDEM = ["aguardando", "em_producao", "finalizado", "entregue"];
 

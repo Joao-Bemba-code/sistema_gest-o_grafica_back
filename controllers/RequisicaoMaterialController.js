@@ -1,7 +1,7 @@
-const { sequelize, RequisicaoMaterial, RequisicaoMaterialItem, Cliente, Material, MovimentoEstoque, Sequencia, OrdemProducao } = require("../models");
-const { Transaction } = require("sequelize");
+const { sequelize, RequisicaoMaterial, RequisicaoMaterialItem, Cliente, Material, MovimentoEstoque, OrdemProducao, ReservaEstoque, Orcamento } = require("../models");
 const { pode } = require("../services/permissoes");
 const notificacoesService = require("../services/notificacoes");
+const requisicoesMaterialService = require("../services/requisicoesMaterial");
 
 // As requisições partem do chão de fábrica. Quem gere o stock regista
 // saídas manuais no Provisionamento e limita-se a aprovar/rejeitar pedidos.
@@ -15,26 +15,12 @@ function gereStock(usuario) {
 
 // Cliente opcional: uma requisição de material acabado (ou de consumo interno
 // na fábrica) não tem cliente associado — é consumo da própria organização.
-const SEM_CLIENTE = "Consumo interno / produção";
+const SEM_CLIENTE = requisicoesMaterialService.SEM_CLIENTE;
 
 function parseNum(v) {
   if (v === undefined || v === null || v === "") return 0;
   const s = String(v).replace(/[^\d,.\-]/g, "").replace(",", ".");
   return parseFloat(s) || 0;
-}
-
-// Corre sequencia na transacao do chamador: abrir uma transaccao aninhada
-// seria uma segunda ligacao e, em SQLite, cause SQLITE_BUSY (a transaccao
-// exterior ja segura a escrita).
-async function proximoNumero(organizacao_id, t) {
-  const lock = sequelize.getDialect() === "mysql" ? Transaction.LOCK.UPDATE : undefined;
-  let seq = await Sequencia.findOne({ where: { organizacao_id }, transaction: t, lock });
-  if (!seq) {
-    seq = await Sequencia.create({ organizacao_id, numero: 0 }, { transaction: t });
-  }
-  const novo = Number(seq.numero || 0) + 1;
-  await seq.update({ numero: novo }, { transaction: t });
-  return `KREQ-${String(novo).padStart(4, "0")}`;
 }
 
 // A aprovação de uma requisição de material só acontece depois de o Estoque
@@ -69,6 +55,15 @@ function lerPreparacao(body = {}) {
   };
 }
 
+function nomeCliente(r) {
+  // A relação é a fonte de verdade: se o cliente existe, mostra-se o nome
+  // actual mesmo que o cliente_nome guardado esteja desactualizado.
+  if (r.cliente?.nome) return r.cliente.nome;
+  const guardado = String(r.cliente_nome || "").trim();
+  if (guardado && guardado !== SEM_CLIENTE) return guardado;
+  return SEM_CLIENTE;
+}
+
 function serializar(r) {
   const itens = (r.itens || []).map((i) => ({
     id: i.id,
@@ -86,8 +81,8 @@ function serializar(r) {
     numero: r.numero,
     ordem_producao_id: r.ordem_producao_id || null,
     ordem_producao_numero: r.ordem_producao?.numero || null,
-    cliente_id: r.cliente_id,
-    cliente_nome: r.cliente_nome,
+    cliente_id: r.cliente_id || r.cliente?.id || null,
+    cliente_nome: nomeCliente(r),
     estado: r.estado,
     observacoes: r.observacoes,
     solicitado_por: r.solicitado_por,
@@ -136,24 +131,35 @@ exports.auxiliares = async (req, res) => {
       // A requisição é sempre feita a partir de uma ordem de produção aberta.
       OrdemProducao.findAll({
         where: { organizacao_id: req.organizacao_id, estado: ["aguardando", "em_producao"] },
-        attributes: ["id", "numero", "produto", "quantidade", "cliente_id", "estado"],
-        include: [{ model: Cliente, required: false, attributes: ["id", "nome", "empresa"] }],
+        attributes: ["id", "numero", "produto", "quantidade", "cliente_id", "orcamento_id", "estado"],
+        include: [
+          { model: Cliente, required: false, attributes: ["id", "nome", "empresa"] },
+          {
+            model: Orcamento,
+            required: false,
+            attributes: ["id", "cliente_id"],
+            include: [{ model: Cliente, required: false, attributes: ["id", "nome", "empresa"] }],
+          },
+        ],
         order: [["createdAt", "DESC"]],
       }),
     ]);
 
     return res.json({
       clientes: clientes.map((c) => ({ id: c.id, nome: c.nome, empresa: c.empresa || "" })),
-      ordens: ordens.map((o) => ({
-        id: o.id,
-        numero: o.numero,
-        produto: o.produto || "",
-        quantidade: Number(o.quantidade) || 0,
-        estado: o.estado,
-        cliente_id: o.cliente_id || null,
-        cliente_nome: o.cliente?.nome || SEM_CLIENTE,
-        cliente_empresa: o.cliente?.empresa || "",
-      })),
+      ordens: ordens.map((o) => {
+        const cliente = o.cliente || o.orcamento?.cliente || null;
+        return {
+          id: o.id,
+          numero: o.numero,
+          produto: o.produto || "",
+          quantidade: Number(o.quantidade) || 0,
+          estado: o.estado,
+          cliente_id: cliente?.id || o.cliente_id || null,
+          cliente_nome: cliente?.nome || SEM_CLIENTE,
+          cliente_empresa: cliente?.empresa || "",
+        };
+      }),
       materiais: materiais.map((m) => {
         const quantidade = Number(m.quantidade) || 0;
         const reservado = Number(m.estoque_reservado) || 0;
@@ -221,7 +227,24 @@ exports.criar = async (req, res) => {
       await t.rollback();
       return res.status(422).json({ erro: "A ordem de produção já está fechada e não admite novas requisições de material" });
     }
-    const cliente = ordem.cliente || null;
+    // O cliente vem sempre da OP (ou do orçamento que a originou); quando não
+    // existe mesmo, a requisição é de consumo interno.
+    const cliente = await requisicoesMaterialService.clienteDaOrdem({
+      ordem,
+      organizacaoId: req.organizacao_id,
+      transaction: t,
+    });
+    // Evita pedidos duplicados enquanto o stock ainda não decidiu o primeiro.
+    const pendente = await RequisicaoMaterial.findOne({
+      where: { organizacao_id: req.organizacao_id, ordem_producao_id: ordem.id, estado: "pendente" },
+      transaction: t,
+    });
+    if (pendente) {
+      await t.rollback();
+      return res.status(422).json({
+        erro: `Esta OP já tem a requisição ${pendente.numero} pendente de aprovação no estoque. Aguarde a decisão antes de criar outra.`,
+      });
+    }
     const brutos = (Array.isArray(b.itens) ? b.itens : []).filter((i) => i && i.material_id);
     if (!brutos.length) {
       await t.rollback();
@@ -256,10 +279,30 @@ exports.criar = async (req, res) => {
 
     // A requisição não bloqueia stock: valida-se a disponibilidade agora para
     // avisar cedo, mas o-stock real é conferido e baixado no momento da aprovação.
+    // As reservas activas desta OP contam como disponíveis para o pedido: já
+    // estão consignadas a esta ordem e não devem fazer o pedido parecer sem stock.
+    const reservasOp = await ReservaEstoque.findAll({
+      where: {
+        organizacao_id: req.organizacao_id,
+        ordem_producao_id: ordem.id,
+        estado: ["ativa", "parcial"],
+      },
+      transaction: t,
+    });
+    const reservadoDaOp = new Map();
+    for (const r of reservasOp) {
+      const restante = Number(r.quantidade_reservada || 0) - Number(r.quantidade_consumida || 0);
+      if (restante <= 0) continue;
+      const id = Number(r.material_id);
+      reservadoDaOp.set(id, Number(((reservadoDaOp.get(id) || 0) + restante).toFixed(2)));
+    }
     const semStock = [];
     for (const item of porMaterial.values()) {
       const m = porId.get(item.material_id);
-      const disponivel = parseFloat(m.quantidade) - parseFloat(m.estoque_reservado || 0);
+      const disponivel =
+        parseFloat(m.quantidade) -
+        parseFloat(m.estoque_reservado || 0) +
+        (reservadoDaOp.get(item.material_id) || 0);
       if (disponivel < item.quantidade) {
         semStock.push(`${m.nome} (disponível ${disponivel} ${m.unidade}, pedido ${item.quantidade})`);
       }
@@ -271,14 +314,14 @@ exports.criar = async (req, res) => {
       });
     }
 
-    const numero = await proximoNumero(req.organizacao_id, t);
+    const numero = await requisicoesMaterialService.proximoNumero(req.organizacao_id, t);
     const requisicao = await RequisicaoMaterial.create(
       {
         numero,
         organizacao_id: req.organizacao_id,
         ordem_producao_id: ordem.id,
-        cliente_id: cliente ? cliente.id : null,
-        cliente_nome: cliente ? cliente.nome : SEM_CLIENTE,
+        cliente_id: cliente.id,
+        cliente_nome: cliente.nome,
         estado: "pendente",
         observacoes: b.observacoes || null,
         solicitado_por: b.solicitado_por || req.usuario?.nome || null,
@@ -332,9 +375,9 @@ exports.criar = async (req, res) => {
         tipo: "estoque",
         nivel: "warning",
         icone: "pending_actions",
-        titulo: `Requisição de material ${numero}`,
-        descricao: `${requisicao.solicitado_por || "Produção"} requisitou ${porMaterial.size} material(is) para a OP ${ordem.numero || ordem.id}${cliente ? ` · ${cliente.nome}` : " · consumo interno"}. Aguarda aprovação.`,
-        link: "/estoque",
+        titulo: `Requisição de material ${numero} — ${cliente.nome}`,
+        descricao: `${requisicao.solicitado_por || "Produção"} requisitou ${porMaterial.size} material(is) para a OP ${ordem.numero || ordem.id} · ${cliente.nome}${ordem.produto ? ` (${ordem.produto})` : ""}. Aguarda aprovação.`,
+        link: "/estoque?requisicoes=1",
         usuarioId: req.usuario?.id || null,
       });
     } catch (e) {
@@ -378,6 +421,33 @@ exports.aprovar = async (req, res) => {
       return res.status(422).json({ erro: "A requisição não tem itens" });
     }
 
+    // Reservas activas da OP: o fluxo antigo da produção reserva stock antes
+    // de pedir a saída. A aprovação consome essa reserva, em vez de descontar
+    // o stock outra vez e deixar a reserva pendente (que voltaria a baixar na
+    // finalização da OP).
+    const reservasAtivas = requisicao.ordem_producao_id
+      ? await ReservaEstoque.findAll({
+          where: {
+            organizacao_id: req.organizacao_id,
+            ordem_producao_id: requisicao.ordem_producao_id,
+            estado: ["ativa", "parcial"],
+          },
+          order: [["id", "ASC"]],
+          transaction: t,
+          lock: t.LOCK.UPDATE,
+        })
+      : [];
+    const reservasPorMaterial = new Map();
+    const reservadoDaOp = new Map();
+    for (const reserva of reservasAtivas) {
+      const restante = Number(reserva.quantidade_reservada || 0) - Number(reserva.quantidade_consumida || 0);
+      if (restante <= 0) continue;
+      const id = Number(reserva.material_id);
+      if (!reservasPorMaterial.has(id)) reservasPorMaterial.set(id, []);
+      reservasPorMaterial.get(id).push(reserva);
+      reservadoDaOp.set(id, Number(((reservadoDaOp.get(id) || 0) + restante).toFixed(2)));
+    }
+
     // Confirma e bloqueia cada material antes de baixar stock.
     const materials = new Map();
     for (const item of itens) {
@@ -395,7 +465,10 @@ exports.aprovar = async (req, res) => {
     const semStock = [];
     for (const item of itens) {
       const m = materials.get(Number(item.id));
-      const disponivel = parseFloat(m.quantidade) - parseFloat(m.estoque_reservado || 0);
+      const disponivel =
+        parseFloat(m.quantidade) -
+        parseFloat(m.estoque_reservado || 0) +
+        (reservadoDaOp.get(Number(item.material_id)) || 0);
       const pedido = parseFloat(item.quantidade) || 0;
       if (disponivel < pedido) {
         semStock.push(`${m.nome} (disponível ${disponivel} ${m.unidade}, pedido ${pedido})`);
@@ -411,7 +484,42 @@ exports.aprovar = async (req, res) => {
     for (const item of itens) {
       const m = materials.get(Number(item.id));
       const qtd = parseFloat(item.quantidade) || 0;
-      await m.update({ quantidade: Number((parseFloat(m.quantidade) - qtd).toFixed(2)) }, { transaction: t });
+
+      // Consome primeiro a reserva desta OP (se existir); a parte que exceder
+      // a reserva sai directamente do stock disponível.
+      let falta = qtd;
+      let reservadoConsumido = 0;
+      for (const reserva of reservasPorMaterial.get(Number(item.material_id)) || []) {
+        if (falta <= 0) break;
+        const restante = Math.max(
+          0,
+          Number(reserva.quantidade_reservada || 0) - Number(reserva.quantidade_consumida || 0)
+        );
+        if (restante <= 0) continue;
+        const consumir = Math.min(falta, restante);
+        const novaConsumida = Number((Number(reserva.quantidade_consumida || 0) + consumir).toFixed(2));
+        await reserva.update(
+          {
+            quantidade_consumida: novaConsumida,
+            estado:
+              novaConsumida >= Number(reserva.quantidade_reservada || 0) ? "consumida" : "parcial",
+          },
+          { transaction: t }
+        );
+        reservadoConsumido += consumir;
+        falta = Number((falta - consumir).toFixed(2));
+      }
+
+      await m.update(
+        {
+          quantidade: Number((parseFloat(m.quantidade) - qtd).toFixed(2)),
+          estoque_reservado: Math.max(
+            0,
+            Number((parseFloat(m.estoque_reservado || 0) - reservadoConsumido).toFixed(2))
+          ),
+        },
+        { transaction: t }
+      );
       await MovimentoEstoque.create(
         {
           organizacao_id: req.organizacao_id,
@@ -467,8 +575,8 @@ exports.aprovar = async (req, res) => {
         nivel: "success",
         icone: "inventory",
         titulo: `Requisição de material ${requisicao.numero} aprovada`,
-        descricao: `${itens.length} material(is) para ${requisicao.cliente_nome} — preparado por ${preparacao.preparado_por}, entregue por ${preparacao.entregue_por}, recebido por ${preparacao.recebido_por}.`,
-        link: "/producao",
+        descricao: `${itens.length} material(is) para ${nomeCliente(requisicao)} — preparado por ${preparacao.preparado_por}, entregue por ${preparacao.entregue_por}, recebido por ${preparacao.recebido_por}.`,
+        link: "/producao?tab=requisicoes",
         usuarioId: req.usuario?.id || null,
       });
     } catch (e) {
@@ -503,6 +611,20 @@ exports.rejeitar = async (req, res) => {
       aprovado_por: req.usuario?.nome || null,
       data_aprovacao: new Date(),
     });
+    // A OP volta a poder pedir: a rejeição não pode deixá-la presa em
+    // "requisitada" (o que impediria uma nova requisição).
+    try {
+      if (requisicao.ordem_producao_id) {
+        const op = await OrdemProducao.findOne({
+          where: { id: requisicao.ordem_producao_id, organizacao_id: req.organizacao_id },
+        });
+        if (op && op.requisicao_estado !== "libertada") {
+          await op.update({ requisicao_estado: "pendente", permitido_por: null });
+        }
+      }
+    } catch (e) {
+      console.error("Erro ao repor a OP após rejeição da requisição:", e);
+    }
     try {
       await notificacoesService.criar({
         organizacaoId: req.organizacao_id,
@@ -510,8 +632,8 @@ exports.rejeitar = async (req, res) => {
         nivel: "error",
         icone: "cancel",
         titulo: `Requisição de material ${requisicao.numero} rejeitada`,
-        descricao: `Pedido para ${requisicao.cliente_nome} recusado por ${req.usuario?.nome || "Estoque"}. Motivo: ${motivo.slice(0, 400)}.`,
-        link: "/producao",
+        descricao: `Pedido para ${nomeCliente(requisicao)} recusado por ${req.usuario?.nome || "Estoque"}. Motivo: ${motivo.slice(0, 400)}.`,
+        link: "/producao?tab=requisicoes",
         usuarioId: req.usuario?.id || null,
       });
     } catch (e) {
@@ -538,6 +660,19 @@ exports.cancelar = async (req, res) => {
       return res.status(422).json({ erro: "Só é possível cancelar uma requisição pendente" });
     }
     await requisicao.update({ estado: "cancelada" });
+    // Devolve a OP ao estado em que pode voltar a pedir material.
+    try {
+      if (requisicao.ordem_producao_id) {
+        const op = await OrdemProducao.findOne({
+          where: { id: requisicao.ordem_producao_id, organizacao_id: req.organizacao_id },
+        });
+        if (op && op.requisicao_estado !== "libertada") {
+          await op.update({ requisicao_estado: "pendente", permitido_por: null });
+        }
+      }
+    } catch (e) {
+      console.error("Erro ao repor a OP após cancelamento da requisição:", e);
+    }
     const completa = await RequisicaoMaterial.findByPk(requisicao.id, { include: INCLUDE });
     return res.json(serializar(completa));
   } catch (e) {
@@ -645,8 +780,8 @@ exports.devolver = async (req, res) => {
         nivel: "info",
         icone: "undo",
         titulo: `Devolução na requisição ${requisicao.numero}`,
-        descricao: `Material devolvido ao stock por ${devolvidoPor || "Produção"}.`,
-        link: "/estoque",
+        descricao: `Material de ${nomeCliente(requisicao)} devolvido ao stock por ${devolvidoPor || "Produção"}.`,
+        link: "/estoque?requisicoes=1",
         usuarioId: req.usuario?.id || null,
       });
     } catch (e) {
