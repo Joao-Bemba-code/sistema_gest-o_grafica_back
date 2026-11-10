@@ -169,7 +169,16 @@ function criarApp(opcoes = {}) {
     app.use("/api/bens", require("./routers/bens"));
     app.use("/api/sinc", require("./routers/sincronizacao"));
     app.use("/api/suporte", require("./routers/suporte"));
-    app.get("/api/health", (req, res) => res.json({ ok: true, hora: new Date().toISOString() }));
+    // O Render expõe o commit de cada deploy no ambiente: assim o /api/health
+    // permite confirmar qual versão está realmente no ar.
+    app.get("/api/health", (req, res) =>
+      res.json({
+        ok: true,
+        hora: new Date().toISOString(),
+        commit: process.env.RENDER_GIT_COMMIT || null,
+        iniciado_em: new Date(Date.now() - process.uptime() * 1000).toISOString(),
+      })
+    );
   }
 
   return app;
