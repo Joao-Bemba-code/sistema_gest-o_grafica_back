@@ -304,6 +304,26 @@ exports.criar = async (req, res) => {
       { transaction: t }
     );
     await requisicao.update({ total_itens: porMaterial.size }, { transaction: t });
+
+    // A requisição nasce de uma OP: a OP passa a "requisitada" (e volta a
+    // precisar de aprovação do estoque se o material já tinha sido libertado,
+    // tal como acontece no fluxo de material adicional do ProducaoController).
+    try {
+      const op = await OrdemProducao.findOne({
+        where: { id: ordem.id, organizacao_id: req.organizacao_id },
+        transaction: t,
+      });
+      if (op) {
+        // pendente → requisitada; requisitada mantém-se; libertada volta a
+        // requisitada porque o novo material precisa de nova aprovação.
+        await op.update({
+          requisicao_estado: "requisitada",
+          solicitado_por: b.solicitado_por || req.usuario?.nome || op.solicitado_por,
+        }, { transaction: t });
+      }
+    } catch (e) {
+      console.error("Erro ao actualizar a OP da requisição:", e);
+    }
     await t.commit();
 
     try {
@@ -424,6 +444,21 @@ exports.aprovar = async (req, res) => {
       },
       { transaction: t }
     );
+    // A aprovação desbloqueia a OP de origem: o material saiu do stock e a
+    // produção pode avançar (espelho do aprovarMateriais do ProducaoController).
+    try {
+      if (requisicao.ordem_producao_id) {
+        const op = await OrdemProducao.findOne({
+          where: { id: requisicao.ordem_producao_id, organizacao_id: req.organizacao_id },
+          transaction: t,
+        });
+        if (op && op.requisicao_estado !== "libertada") {
+          await op.update({ requisicao_estado: "libertada", permitido_por: aprovadoPor }, { transaction: t });
+        }
+      }
+    } catch (e) {
+      console.error("Erro ao libertar a OP da requisição aprovada:", e);
+    }
     await t.commit();
     try {
       await notificacoesService.criar({

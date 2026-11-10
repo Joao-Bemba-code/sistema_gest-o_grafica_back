@@ -174,10 +174,30 @@ exports.remover = async (req, res) => {
 exports.movimentar = async (req, res) => {
   const t = await sequelize.transaction();
   try {
-    const { material_id, material_destino_id, tipo, quantidade, motivo, lote, data_fabricacao, validade, referencia_tipo, referencia_id, observacoes, cliente_nome, fornecedor_nome, solicitado_por, permitido_por } = req.body;
+    const { material_id, material_destino_id, tipo, quantidade, motivo, lote, data_fabricacao, validade, referencia_tipo, referencia_id, observacoes, solicitado_por, permitido_por } = req.body;
+    let { cliente_nome, fornecedor_nome } = req.body;
     if (!material_id || !tipo || !quantidade) {
       await t.rollback();
       return res.status(422).json({ erro: "Material, tipo e quantidade são obrigatórios" });
+    }
+    const material = await Material.findOne({
+      where: { id: material_id, organizacao_id: req.organizacao_id },
+      include: [{ model: Categoria, as: "categoria", required: false, attributes: ["id", "nome", "tipo"] }],
+      transaction: t,
+    });
+    if (!material) {
+      await t.rollback();
+      return res.status(404).json({ erro: "Material não encontrado" });
+    }
+    // Materiais da categoria "consumo interno" não têm preço de venda nem
+    // cliente/fornecedor associado: a entrada/saída continua a ser permitida
+    // usando "Consumo interno" como contraparte do movimento.
+    const nomeCategoria = String((material.categoria && material.categoria.nome) || "").toLowerCase();
+    const tipoCategoria = String((material.categoria && material.categoria.tipo) || "").toLowerCase();
+    const consumoInterno = nomeCategoria.includes("consumo interno") || tipoCategoria.includes("consumo interno");
+    if (consumoInterno) {
+      cliente_nome = cliente_nome || "Consumo interno";
+      fornecedor_nome = fornecedor_nome || "Consumo interno";
     }
     if (tipo === "saida" && !cliente_nome && !String(motivo || "").toLowerCase().includes("transfer")) {
       await t.rollback();
@@ -190,14 +210,6 @@ exports.movimentar = async (req, res) => {
     if (tipo === "transferencia" && !material_destino_id) {
       await t.rollback();
       return res.status(422).json({ erro: "Informe o material de destino para a transferência" });
-    }
-    const material = await Material.findOne({
-      where: { id: material_id, organizacao_id: req.organizacao_id },
-      transaction: t,
-    });
-    if (!material) {
-      await t.rollback();
-      return res.status(404).json({ erro: "Material não encontrado" });
     }
     const qtd = parseFloat(quantidade);
     if (qtd <= 0) {
