@@ -55,16 +55,38 @@ function lerPreparacao(body = {}) {
   };
 }
 
+// Ordem de fiabilidade do cliente de uma requisição:
+//   1. relação Cliente da própria requisição;
+//   2. nome guardado na requisição (quando não é a etiqueta de consumo interno);
+//   3. cliente da OP de origem (ou do orçamento que a criou).
+// O passo 3 recupera registos antigos que ficaram com a etiqueta de consumo
+// interno apesar de a OP ter cliente.
+function clienteDaRequisicao(r) {
+  if (r?.cliente?.nome) {
+    return { id: r.cliente.id || r.cliente_id || null, nome: r.cliente.nome };
+  }
+  const guardado = String(r?.cliente_nome || "").trim();
+  if (guardado && guardado !== SEM_CLIENTE) {
+    return { id: r.cliente_id || null, nome: guardado };
+  }
+  const ordem = r?.ordem_producao;
+  const clienteOrdem = ordem?.cliente?.nome
+    ? ordem.cliente
+    : ordem?.orcamento?.cliente?.nome
+      ? ordem.orcamento.cliente
+      : null;
+  if (clienteOrdem?.nome) {
+    return { id: clienteOrdem.id || ordem.cliente_id || null, nome: clienteOrdem.nome };
+  }
+  return { id: r?.cliente_id || null, nome: SEM_CLIENTE };
+}
+
 function nomeCliente(r) {
-  // A relação é a fonte de verdade: se o cliente existe, mostra-se o nome
-  // actual mesmo que o cliente_nome guardado esteja desactualizado.
-  if (r.cliente?.nome) return r.cliente.nome;
-  const guardado = String(r.cliente_nome || "").trim();
-  if (guardado && guardado !== SEM_CLIENTE) return guardado;
-  return SEM_CLIENTE;
+  return clienteDaRequisicao(r).nome;
 }
 
 function serializar(r) {
+  const cliente = clienteDaRequisicao(r);
   const itens = (r.itens || []).map((i) => ({
     id: i.id,
     material_id: i.material_id,
@@ -81,8 +103,8 @@ function serializar(r) {
     numero: r.numero,
     ordem_producao_id: r.ordem_producao_id || null,
     ordem_producao_numero: r.ordem_producao?.numero || null,
-    cliente_id: r.cliente_id || r.cliente?.id || null,
-    cliente_nome: nomeCliente(r),
+    cliente_id: cliente.id || null,
+    cliente_nome: cliente.nome,
     estado: r.estado,
     observacoes: r.observacoes,
     solicitado_por: r.solicitado_por,
@@ -106,7 +128,16 @@ const INCLUDE = [
     model: OrdemProducao,
     as: "ordem_producao",
     required: false,
-    attributes: ["id", "numero", "produto", "quantidade", "estado"],
+    attributes: ["id", "numero", "produto", "quantidade", "estado", "cliente_id", "orcamento_id"],
+    include: [
+      { model: Cliente, required: false, attributes: ["id", "nome"] },
+      {
+        model: Orcamento,
+        required: false,
+        attributes: ["id", "cliente_id"],
+        include: [{ model: Cliente, required: false, attributes: ["id", "nome"] }],
+      },
+    ],
   },
 ];
 

@@ -1,4 +1,4 @@
-const { sequelize, Material, MovimentoEstoque, Categoria, ReservaEstoque, OrdemProducao, TesourariaMovimento } = require("../models");
+const { sequelize, Material, MovimentoEstoque, Categoria, ReservaEstoque, OrdemProducao, TesourariaMovimento, RequisicaoMaterial, Cliente } = require("../models");
 const estoqueService = require("../services/estoque");
 const { prefixoK, nomeCategoriaDosDados } = require("../services/codigoArtigo");
 
@@ -423,7 +423,36 @@ exports.extrato = async (req, res) => {
       include: [{ model: Material, required: false, include: [{ model: Categoria, as: "categoria", required: false, attributes: ["id", "nome", "familia", "tipo"] }] }],
       order: [["createdAt", "DESC"]],
     });
-    return res.json(movimentos);
+
+    // O movimento guarda o nome do cliente no momento da saída. Em requisições
+    // antigas esse nome ficou com a etiqueta de consumo interno, mesmo quando a
+    // requisição tem cliente: a relação da requisição é a fonte de verdade.
+    const idsRequisicao = [...new Set(
+      movimentos
+        .filter((m) => m.referencia_tipo === "requisicao_material" && m.referencia_id)
+        .map((m) => Number(m.referencia_id))
+    )];
+    const requisicoesPorId = new Map();
+    if (idsRequisicao.length) {
+      const requisicoes = await RequisicaoMaterial.findAll({
+        where: { id: idsRequisicao, organizacao_id: req.organizacao_id },
+        include: [{ model: Cliente, as: "cliente", required: false, attributes: ["id", "nome"] }],
+      });
+      requisicoes.forEach((r) => requisicoesPorId.set(Number(r.id), r));
+    }
+
+    return res.json(movimentos.map((m) => {
+      const json = m.toJSON ? m.toJSON() : m;
+      const requisicao = json.referencia_tipo === "requisicao_material"
+        ? requisicoesPorId.get(Number(json.referencia_id))
+        : null;
+      if (requisicao) {
+        const guardado = String(requisicao.cliente_nome || "").trim();
+        const nome = requisicao.cliente?.nome || (guardado && guardado !== "Consumo interno / produção" ? guardado : "");
+        if (nome) json.cliente_nome = nome;
+      }
+      return json;
+    }));
   } catch (e) {
     console.error("Erro ao buscar extrato:", e);
     return res.status(500).json({ erro: "Erro ao buscar extrato" });

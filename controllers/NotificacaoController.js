@@ -1,15 +1,32 @@
 const { Notificacao } = require("../models");
 
+// Notificações antigas de requisição de material foram guardadas com um link
+// genérico ("/estoque"), o que deixava o utilizador sem caminho para o painel
+// de aprovação. Corrige-se na leitura, para as notificações que já existem nas
+// bases (local e produção) passarem a abrir o painel correcto.
+function linkParaAprovacao(n) {
+  const json = n.toJSON ? n.toJSON() : n;
+  if (
+    json.tipo === "estoque" &&
+    /^Requisição de material\b/i.test(json.titulo || "") &&
+    (!json.link || json.link === "/estoque")
+  ) {
+    return { ...json, link: "/estoque?requisicoes=1" };
+  }
+  return json;
+}
+
 exports.listar = async (req, res) => {
   try {
     const { limite = 30, apenas_nao_lidas } = req.query;
     const where = { organizacao_id: req.organizacao_id };
     if (apenas_nao_lidas === "true") where.lida = false;
-    const notificacoes = await Notificacao.findAll({
+    const registos = await Notificacao.findAll({
       where,
       order: [["createdAt", "DESC"]],
       limit: Math.min(parseInt(limite, 10) || 30, 100),
     });
+    const notificacoes = registos.map(linkParaAprovacao);
     return res.json({ notificacoes });
   } catch (e) {
     console.error("Erro ao listar notificações:", e);
