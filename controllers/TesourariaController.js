@@ -2,6 +2,7 @@ const { TesourariaMovimento, TesourariaAnexo, ContaBancaria, Cliente, Faturacao,
 const { Op, fn, col, literal } = require("sequelize");
 const { gerarExcel } = require("../services/tesourariaExcel");
 const auditoria = require("../services/auditoria");
+const limiteDivida = require("../services/limiteDivida");
 
 const ESTADOS = ["pendente", "confirmado", "cancelado", "anulado"];
 const TIPOS = ["entrada", "saida", "transferencia"];
@@ -75,6 +76,18 @@ exports.listar = async (req, res) => {
   } catch (e) {
     console.error("Erro ao listar movimentos:", e);
     return res.status(500).json({ erro: "Erro ao listar movimentos de tesouraria" });
+  }
+};
+
+// Painel de alertas: parâmetros globais de crédito e dívidas por cliente,
+// com juro sobre atraso e desconto disponível por pagamento antecipado.
+exports.alertasDividas = async (req, res) => {
+  try {
+    const info = await limiteDivida.obterAlertas(req.organizacao_id);
+    return res.json(info);
+  } catch (e) {
+    console.error("Erro ao calcular alertas de dívidas:", e);
+    return res.status(500).json({ erro: "Erro ao carregar alertas de dívidas" });
   }
 };
 

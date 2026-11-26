@@ -13,6 +13,7 @@ const VER_MOVIMENTOS = requireQualquerPermissao([["tesouraria", "ver"], ["financ
 
 router.get("/exportar", requirePermissao("tesouraria", "ver"), Controller.exportar);
 router.get("/resumo", VER_MOVIMENTOS, Controller.resumo);
+router.get("/alertas-dividas", VER_MOVIMENTOS, Controller.alertasDividas);
 // Download de anexo ANTES do GET /:id para "anexos" não ser capturado como id
 router.get("/anexos/:anexoId", requirePermissao("tesouraria", "ver"), Controller.downloadAnexo);
 router.get("/", VER_MOVIMENTOS, Controller.listar);

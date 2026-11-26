@@ -234,6 +234,11 @@ async function aplicarMigracoesMysql(sequelize) {
 
   // Limite global de dívida por cliente. 0 (por omissão) = sem bloqueio.
   await adicionar("sistema", "limite_divida_cliente", "DECIMAL(14,2) NOT NULL DEFAULT 0");
+  // Prazo global, juro por atraso e desconto por pagamento antecipado.
+  await adicionar("sistema", "prazo_divida_dias", "INT NOT NULL DEFAULT 30");
+  await adicionar("sistema", "juro_divida_percentual", "DECIMAL(5,2) NOT NULL DEFAULT 0");
+  await adicionar("sistema", "desconto_divida_percentual", "DECIMAL(5,2) NOT NULL DEFAULT 0");
+  await adicionar("sistema", "desconto_prazo_dias", "INT NOT NULL DEFAULT 0");
 
   // Compras: crédito do fornecedor e pagamento registado na própria encomenda.
   await adicionar("pedido", "forma_pagamento", "VARCHAR(20) NOT NULL DEFAULT 'a_vista'");

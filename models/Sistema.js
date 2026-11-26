@@ -13,6 +13,16 @@ const Sistema = sequelize.define("sistema", {
   // Limite de dívida permitido por cliente, global para a organização.
   // 0 (por omissão) significa sem bloqueio.
   limite_divida_cliente: { type: DataTypes.DECIMAL(14, 2), defaultValue: 0 },
+  // Prazo global para dívidas de clientes. Conta a partir da data de emissão
+  // da fatura; 30 dias por omissão (o prazo habitual das faturas emitidas).
+  prazo_divida_dias: { type: DataTypes.INTEGER, defaultValue: 30 },
+  // Juro simples aplicado ao saldo vencido, em percentagem por cada 30 dias
+  // de atraso. 0 (por omissão) não acrescenta juro.
+  juro_divida_percentual: { type: DataTypes.DECIMAL(5, 2), defaultValue: 0 },
+  // Desconto por pagamento antecipado: percentagem sobre o saldo e prazo
+  // (em dias desde a emissão) dentro do qual o desconto pode ser aplicado.
+  desconto_divida_percentual: { type: DataTypes.DECIMAL(5, 2), defaultValue: 0 },
+  desconto_prazo_dias: { type: DataTypes.INTEGER, defaultValue: 0 },
   // Compras: controlo por alçada — encomendas acima do limiar só podem ser
   // encomendadas (enviadas ao fornecedor) após aprovação.
   compras_exige_aprovacao: { type: DataTypes.BOOLEAN, defaultValue: true },

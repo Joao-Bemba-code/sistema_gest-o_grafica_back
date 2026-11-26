@@ -43,7 +43,8 @@ exports.guardarSistema = async (req, res) => {
     const {
       idioma, formato_data, moeda, fuso_horario, dias_aviso_ferias, limite_ficheiros,
       compras_exige_aprovacao, compras_alcada_valor, compras_alcada_valor_superior,
-      limite_divida_cliente,
+      limite_divida_cliente, prazo_divida_dias, juro_divida_percentual,
+      desconto_divida_percentual, desconto_prazo_dias,
     } = req.body;
     let sistema = await Sistema.findOne({ where: { organizacao_id: req.organizacao_id } });
     if (!sistema) {
@@ -57,6 +58,18 @@ exports.guardarSistema = async (req, res) => {
       limite_divida_cliente: limite_divida_cliente !== undefined
         ? Math.max(0, Number(limite_divida_cliente) || 0)
         : sistema.limite_divida_cliente,
+      prazo_divida_dias: prazo_divida_dias !== undefined
+        ? Math.max(0, Math.floor(Number(prazo_divida_dias) || 0))
+        : sistema.prazo_divida_dias,
+      juro_divida_percentual: juro_divida_percentual !== undefined
+        ? Math.min(100, Math.max(0, Number(juro_divida_percentual) || 0))
+        : sistema.juro_divida_percentual,
+      desconto_divida_percentual: desconto_divida_percentual !== undefined
+        ? Math.min(100, Math.max(0, Number(desconto_divida_percentual) || 0))
+        : sistema.desconto_divida_percentual,
+      desconto_prazo_dias: desconto_prazo_dias !== undefined
+        ? Math.max(0, Math.floor(Number(desconto_prazo_dias) || 0))
+        : sistema.desconto_prazo_dias,
     });
     return res.json(sistema);
   } catch (e) {

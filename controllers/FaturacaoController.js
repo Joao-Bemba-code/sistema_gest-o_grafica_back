@@ -3,6 +3,8 @@ const { Op } = require("sequelize");
 const agtClient = require("../services/agtClient");
 const { obterConfigAGT, agtPronto } = require("../services/agtConfig");
 const auditoria = require("../services/auditoria");
+const limiteDivida = require("../services/limiteDivida");
+const descontoPagamento = require("../services/descontoPagamento");
 
 const ESTADOS = ["emitida", "paga", "parcial", "vencida", "cancelada"];
 const TIPOS = ["fatura", "recibo", "proforma", "nota_credito", "factura_recibo"];
@@ -563,23 +565,44 @@ exports.marcarPaga = async (req, res) => {
     }
     const body = req.body || {};
     const total = parseFloat(fatura.total || fatura.valor) || 0;
+    const dataPagamento = body.data_pagamento || new Date().toISOString().split("T")[0];
+    const aplicarDesconto = body.aplicar_desconto === true || body.aplicar_desconto === "true";
+    const desconto = aplicarDesconto
+      ? await limiteDivida.calcularDescontoPagamento(req.organizacao_id, fatura, dataPagamento)
+      : { percentual: 0, valor: 0 };
+    const totalEfetivo = Math.max(0, total - desconto.valor);
     let valorPago = parseFloat(body.valor_pago) || 0;
-    if (valorPago <= 0 || valorPago >= total) valorPago = total;
+    if (valorPago <= 0 || valorPago >= totalEfetivo) valorPago = totalEfetivo;
+    valorPago = Math.min(valorPago, totalEfetivo);
+    const liquidada = valorPago >= totalEfetivo - 0.005;
+    const notaDesconto = desconto.valor > 0
+      ? ` · Desconto de ${desconto.percentual}% (${desconto.valor.toLocaleString("pt-AO")} Kz) por pagamento antecipado`
+      : "";
     await fatura.update({
       valor_pago: valorPago,
-      estado: valorPago >= total ? "paga" : "parcial",
+      estado: liquidada ? "paga" : "parcial",
       metodo_pagamento: body.metodo || body.metodo_pagamento || fatura.metodo_pagamento,
-      data_pagamento: body.data_pagamento || new Date().toISOString().split("T")[0],
+      data_pagamento: dataPagamento,
       conta_bancaria_id: body.conta_bancaria_id || body.conta || fatura.conta_bancaria_id,
+      observacoes: `${fatura.observacoes || ""}${notaDesconto}` || null,
     });
-    if (valorPago >= total) {
+    if (liquidada) {
       await registarEntradaTesouraria(
         req,
-        { ...fatura.toJSON(), data_pagamento: body.data_pagamento || fatura.data_pagamento },
+        { ...fatura.toJSON(), data_pagamento: dataPagamento },
         valorPago,
         body.metodo || body.metodo_pagamento || fatura.metodo_pagamento,
         body.conta_bancaria_id || body.conta || fatura.conta_bancaria_id
       );
+      if (desconto.valor > 0) {
+        await descontoPagamento.registarDesconto(
+          req,
+          fatura,
+          desconto,
+          body.metodo || body.metodo_pagamento || fatura.metodo_pagamento,
+          body.conta_bancaria_id || body.conta || fatura.conta_bancaria_id
+        );
+      }
     }
     const completa = await Faturacao.findByPk(fatura.id, { include: [{ model: Cliente, required: false }, { model: Orcamento, required: false }, { model: OrdemProducao, required: false }] });
     return res.json(completa);
