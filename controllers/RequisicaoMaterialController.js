@@ -17,6 +17,12 @@ function gereStock(usuario) {
 // na fábrica) não tem cliente associado — é consumo da própria organização.
 const SEM_CLIENTE = requisicoesMaterialService.SEM_CLIENTE;
 
+// Os dois tipos de requisição de material: ligada a uma ordem de produção ou
+// avulsa, sem ordem de produção (consumo interno / cliente directo).
+const TIPO_COM_OP = "ordem_producao";
+const TIPO_SEM_OP = "sem_ordem";
+const TIPOS_REQUISICAO = [TIPO_COM_OP, TIPO_SEM_OP];
+
 function parseNum(v) {
   if (v === undefined || v === null || v === "") return 0;
   const s = String(v).replace(/[^\d,.\-]/g, "").replace(",", ".");
@@ -101,6 +107,9 @@ function serializar(r) {
   return {
     id: r.id,
     numero: r.numero,
+    // A ligação à OP é a fonte de verdade: cobre registos antigos (sem o
+    // campo `tipo`) e evita mostrar uma requisição avulsa como "com OP".
+    tipo: r.ordem_producao_id ? TIPO_COM_OP : TIPO_SEM_OP,
     ordem_producao_id: r.ordem_producao_id || null,
     ordem_producao_numero: r.ordem_producao?.numero || null,
     cliente_id: cliente.id || null,
@@ -159,7 +168,8 @@ exports.auxiliares = async (req, res) => {
         attributes: ["id", "codigo", "nome", "unidade", "quantidade", "estoque_reservado"],
         order: [["nome", "ASC"]],
       }),
-      // A requisição é sempre feita a partir de uma ordem de produção aberta.
+      // Ordens abertas para o tipo "ordem_producao". O tipo "sem_ordem" usa a
+      // lista de clientes (ou o consumo interno) e não aparece aqui.
       OrdemProducao.findAll({
         where: { organizacao_id: req.organizacao_id, estado: ["aguardando", "em_producao"] },
         attributes: ["id", "numero", "produto", "quantidade", "cliente_id", "orcamento_id", "estado"],
@@ -213,11 +223,12 @@ exports.auxiliares = async (req, res) => {
 
 exports.listar = async (req, res) => {
   try {
-    const { estado, cliente_id, ordem_producao_id } = req.query || {};
+    const { estado, cliente_id, ordem_producao_id, tipo } = req.query || {};
     const where = { organizacao_id: req.organizacao_id };
     if (estado) where.estado = estado;
     if (cliente_id) where.cliente_id = cliente_id;
     if (ordem_producao_id) where.ordem_producao_id = ordem_producao_id;
+    if (TIPOS_REQUISICAO.includes(tipo)) where.tipo = tipo;
     const requisicoes = await RequisicaoMaterial.findAll({
       where,
       include: INCLUDE,
@@ -238,43 +249,77 @@ exports.criar = async (req, res) => {
       return res.status(422).json({ erro: "As requisições são criadas pelo pessoal da produção. O stock deve aprovar ou rejeitar o pedido." });
     }
     const b = req.body || {};
-    // A requisição é feita com base numa ordem de produção: é a OP que define o
-    // cliente e o destino do material. O cliente não é escolhido à parte.
-    const ordemId = Number(b.ordem_producao_id);
-    if (!Number.isInteger(ordemId) || ordemId <= 0) {
-      await t.rollback();
-      return res.status(422).json({ erro: "Selecione a ordem de produção a que se destina a requisição" });
-    }
-    const ordem = await OrdemProducao.findOne({
-      where: { id: ordemId, organizacao_id: req.organizacao_id },
-      include: [{ model: Cliente, required: false }],
-      transaction: t,
-    });
-    if (!ordem) {
-      await t.rollback();
-      return res.status(422).json({ erro: "Seleccione uma ordem de produção válida" });
-    }
-    if (["finalizado", "entregue"].includes(ordem.estado)) {
-      await t.rollback();
-      return res.status(422).json({ erro: "A ordem de produção já está fechada e não admite novas requisições de material" });
-    }
-    // O cliente vem sempre da OP (ou do orçamento que a originou); quando não
-    // existe mesmo, a requisição é de consumo interno.
-    const cliente = await requisicoesMaterialService.clienteDaOrdem({
-      ordem,
-      organizacaoId: req.organizacao_id,
-      transaction: t,
-    });
-    // Evita pedidos duplicados enquanto o stock ainda não decidiu o primeiro.
-    const pendente = await RequisicaoMaterial.findOne({
-      where: { organizacao_id: req.organizacao_id, ordem_producao_id: ordem.id, estado: "pendente" },
-      transaction: t,
-    });
-    if (pendente) {
+    // Tipo explícito enviado pelo formulário. Aceita o formato antigo (só OP)
+    // para não quebrar integrações: com ordem_producao_id presume-se "com OP".
+    const tipo = String(b.tipo || (b.ordem_producao_id ? TIPO_COM_OP : TIPO_SEM_OP)).trim();
+    if (!TIPOS_REQUISICAO.includes(tipo)) {
       await t.rollback();
       return res.status(422).json({
-        erro: `Esta OP já tem a requisição ${pendente.numero} pendente de aprovação no estoque. Aguarde a decisão antes de criar outra.`,
+        erro: "Tipo de requisição inválido — use 'ordem_producao' ou 'sem_ordem'",
       });
+    }
+
+    let ordem = null;
+    let cliente;
+    if (tipo === TIPO_COM_OP) {
+      // Neste tipo é a OP que define o cliente e o destino do material.
+      const ordemId = Number(b.ordem_producao_id);
+      if (!Number.isInteger(ordemId) || ordemId <= 0) {
+        await t.rollback();
+        return res.status(422).json({ erro: "Selecione a ordem de produção a que se destina a requisição" });
+      }
+      ordem = await OrdemProducao.findOne({
+        where: { id: ordemId, organizacao_id: req.organizacao_id },
+        include: [{ model: Cliente, required: false }],
+        transaction: t,
+      });
+      if (!ordem) {
+        await t.rollback();
+        return res.status(422).json({ erro: "Seleccione uma ordem de produção válida" });
+      }
+      if (["finalizado", "entregue"].includes(ordem.estado)) {
+        await t.rollback();
+        return res.status(422).json({ erro: "A ordem de produção já está fechada e não admite novas requisições de material" });
+      }
+      // O cliente vem da OP (ou do orçamento que a originou); quando não
+      // existe mesmo, a requisição é de consumo interno.
+      cliente = await requisicoesMaterialService.clienteDaOrdem({
+        ordem,
+        organizacaoId: req.organizacao_id,
+        transaction: t,
+      });
+      // Evita pedidos duplicados enquanto o stock ainda não decidiu o primeiro.
+      const pendente = await RequisicaoMaterial.findOne({
+        where: { organizacao_id: req.organizacao_id, ordem_producao_id: ordem.id, estado: "pendente" },
+        transaction: t,
+      });
+      if (pendente) {
+        await t.rollback();
+        return res.status(422).json({
+          erro: `Esta OP já tem a requisição ${pendente.numero} pendente de aprovação no estoque. Aguarde a decisão antes de criar outra.`,
+        });
+      }
+    } else {
+      // Requisição avulsa: não há ordem de produção envolvida. O cliente é
+      // opcional e pode vir do cadastro ou de um nome/destino livre.
+      const clienteId = Number(b.cliente_id || 0);
+      let clienteEscolhido = null;
+      if (clienteId > 0) {
+        clienteEscolhido = await Cliente.findOne({
+          where: { id: clienteId, organizacao_id: req.organizacao_id, ativo: true },
+          transaction: t,
+        });
+        if (!clienteEscolhido) {
+          await t.rollback();
+          return res.status(422).json({ erro: "Seleccione um cliente válido" });
+        }
+      }
+      const nomeLivre = String(b.cliente_nome || "").trim().slice(0, 200);
+      cliente = clienteEscolhido
+        ? { id: clienteEscolhido.id, nome: clienteEscolhido.nome }
+        : nomeLivre && nomeLivre !== SEM_CLIENTE
+          ? { id: null, nome: nomeLivre }
+          : { id: null, nome: SEM_CLIENTE };
     }
     const brutos = (Array.isArray(b.itens) ? b.itens : []).filter((i) => i && i.material_id);
     if (!brutos.length) {
@@ -310,16 +355,18 @@ exports.criar = async (req, res) => {
 
     // A requisição não bloqueia stock: valida-se a disponibilidade agora para
     // avisar cedo, mas o-stock real é conferido e baixado no momento da aprovação.
-    // As reservas activas desta OP contam como disponíveis para o pedido: já
-    // estão consignadas a esta ordem e não devem fazer o pedido parecer sem stock.
-    const reservasOp = await ReservaEstoque.findAll({
-      where: {
-        organizacao_id: req.organizacao_id,
-        ordem_producao_id: ordem.id,
-        estado: ["ativa", "parcial"],
-      },
-      transaction: t,
-    });
+    // Só as requisições com OP consideram as reservas dessa ordem como
+    // disponíveis: as avulsas usam apenas o stock livre.
+    const reservasOp = ordem
+      ? await ReservaEstoque.findAll({
+          where: {
+            organizacao_id: req.organizacao_id,
+            ordem_producao_id: ordem.id,
+            estado: ["ativa", "parcial"],
+          },
+          transaction: t,
+        })
+      : [];
     const reservadoDaOp = new Map();
     for (const r of reservasOp) {
       const restante = Number(r.quantidade_reservada || 0) - Number(r.quantidade_consumida || 0);
@@ -350,7 +397,8 @@ exports.criar = async (req, res) => {
       {
         numero,
         organizacao_id: req.organizacao_id,
-        ordem_producao_id: ordem.id,
+        tipo,
+        ordem_producao_id: ordem?.id || null,
         cliente_id: cliente.id,
         cliente_nome: cliente.nome,
         estado: "pendente",
@@ -379,24 +427,26 @@ exports.criar = async (req, res) => {
     );
     await requisicao.update({ total_itens: porMaterial.size }, { transaction: t });
 
-    // A requisição nasce de uma OP: a OP passa a "requisitada" (e volta a
-    // precisar de aprovação do estoque se o material já tinha sido libertado,
-    // tal como acontece no fluxo de material adicional do ProducaoController).
-    try {
-      const op = await OrdemProducao.findOne({
-        where: { id: ordem.id, organizacao_id: req.organizacao_id },
-        transaction: t,
-      });
-      if (op) {
-        // pendente → requisitada; requisitada mantém-se; libertada volta a
-        // requisitada porque o novo material precisa de nova aprovação.
-        await op.update({
-          requisicao_estado: "requisitada",
-          solicitado_por: b.solicitado_por || req.usuario?.nome || op.solicitado_por,
-        }, { transaction: t });
+    // Só o tipo "ordem_producao" mexe na OP de origem: a OP passa a
+    // "requisitada" (e volta a precisar de aprovação se o material já tinha
+    // sido libertado). A requisição avulsa não altera nenhuma ordem.
+    if (ordem) {
+      try {
+        const op = await OrdemProducao.findOne({
+          where: { id: ordem.id, organizacao_id: req.organizacao_id },
+          transaction: t,
+        });
+        if (op) {
+          // pendente → requisitada; requisitada mantém-se; libertada volta a
+          // requisitada porque o novo material precisa de nova aprovação.
+          await op.update({
+            requisicao_estado: "requisitada",
+            solicitado_por: b.solicitado_por || req.usuario?.nome || op.solicitado_por,
+          }, { transaction: t });
+        }
+      } catch (e) {
+        console.error("Erro ao actualizar a OP da requisição:", e);
       }
-    } catch (e) {
-      console.error("Erro ao actualizar a OP da requisição:", e);
     }
     await t.commit();
 
@@ -407,7 +457,7 @@ exports.criar = async (req, res) => {
         nivel: "warning",
         icone: "pending_actions",
         titulo: `Requisição de material ${numero} — ${cliente.nome}`,
-        descricao: `${requisicao.solicitado_por || "Produção"} requisitou ${porMaterial.size} material(is) para a OP ${ordem.numero || ordem.id} · ${cliente.nome}${ordem.produto ? ` (${ordem.produto})` : ""}. Aguarda aprovação.`,
+        descricao: `${requisicao.solicitado_por || "Produção"} requisitou ${porMaterial.size} material(is) ${ordem ? `para a OP ${ordem.numero || ordem.id} · ${cliente.nome}${ordem.produto ? ` (${ordem.produto})` : ""}` : `sem ordem de produção · ${cliente.nome}`}. Aguarda aprovação.`,
         link: "/estoque?requisicoes=1",
         usuarioId: req.usuario?.id || null,
       });

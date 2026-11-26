@@ -190,9 +190,20 @@ async function aplicarMigracoesMysql(sequelize) {
     console.log("MIGRAÇÃO: requisicao_material.cliente_id aceita NULL");
   }
 
-  // Toda a requisição de material passa a estar ligada a uma ordem de produção.
-  // Registos antigos ficam sem OP (NULL) até serem associados manualmente.
+  // A requisição pode estar ligada a uma OP ou ser avulsa (sem OP). Registos
+  // antigos ficam sem OP (NULL) até serem associados manualmente.
   await adicionar("requisicao_material", "ordem_producao_id", "INT NULL");
+
+  // Dois tipos de requisição: 'ordem_producao' e 'sem_ordem'. Classifica o
+  // histórico pela presença da OP para não alterar o comportamento antigo.
+  await adicionar("requisicao_material", "tipo", "VARCHAR(20) NOT NULL DEFAULT 'ordem_producao'");
+  await sequelize.query(
+    "UPDATE `requisicao_material` SET `tipo` = 'sem_ordem' WHERE `ordem_producao_id` IS NULL"
+  );
+  await sequelize.query(
+    "UPDATE `requisicao_material` SET `tipo` = 'ordem_producao' WHERE `ordem_producao_id` IS NOT NULL AND (`tipo` IS NULL OR `tipo` = '')"
+  );
+  console.log("MIGRAÇÃO: requisicao_material.tipo classificado (com OP / sem OP)");
 
   // Aprovação passa a registar quem preparou, quem entregou e a data/hora da saída.
   await adicionar("requisicao_material", "preparado_por", "VARCHAR(200) NULL");

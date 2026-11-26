@@ -115,6 +115,7 @@ async function garantirRequisicaoDaOrdem({ ordem, organizacaoId, solicitadoPor, 
     {
       numero,
       organizacao_id: organizacaoId,
+      tipo: "ordem_producao",
       ordem_producao_id: ordem.id,
       cliente_id: cliente.id,
       cliente_nome: cliente.nome,

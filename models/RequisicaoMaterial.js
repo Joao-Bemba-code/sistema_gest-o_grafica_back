@@ -5,8 +5,16 @@ const RequisicaoMaterial = sequelize.define("requisicao_material", {
   id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true },
   organizacao_id: { type: DataTypes.INTEGER, allowNull: false },
   numero: { type: DataTypes.STRING(20), allowNull: false },
-  // A requisição nasce sempre de uma ordem de produção. Fica nulo apenas em
-  // registos antigos, anteriores a esta regra.
+  // Dois tipos de requisição: "ordem_producao" fica ligada a uma OP aberta e
+  // actualiza o estado dessa ordem; "sem_ordem" é uma saída avulsa (consumo
+  // interno ou cliente directo) e não mexe em nenhuma ordem de produção.
+  tipo: {
+    type: DataTypes.STRING(20),
+    allowNull: false,
+    defaultValue: "ordem_producao",
+  },
+  // Nulo no tipo "sem_ordem"; nos registos antigos pode ficar nulo por
+  // ausência da ligação à OP.
   ordem_producao_id: { type: DataTypes.INTEGER, allowNull: true },
   // Nulo quando é consumo interno / material acabado (não há cliente).
   cliente_id: { type: DataTypes.INTEGER, allowNull: true },
