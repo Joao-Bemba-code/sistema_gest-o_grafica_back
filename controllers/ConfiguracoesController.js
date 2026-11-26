@@ -43,6 +43,7 @@ exports.guardarSistema = async (req, res) => {
     const {
       idioma, formato_data, moeda, fuso_horario, dias_aviso_ferias, limite_ficheiros,
       compras_exige_aprovacao, compras_alcada_valor, compras_alcada_valor_superior,
+      limite_divida_cliente,
     } = req.body;
     let sistema = await Sistema.findOne({ where: { organizacao_id: req.organizacao_id } });
     if (!sistema) {
@@ -53,6 +54,9 @@ exports.guardarSistema = async (req, res) => {
       compras_exige_aprovacao: compras_exige_aprovacao !== undefined ? !!compras_exige_aprovacao : sistema.compras_exige_aprovacao,
       compras_alcada_valor: compras_alcada_valor !== undefined ? Number(compras_alcada_valor) || 0 : sistema.compras_alcada_valor,
       compras_alcada_valor_superior: compras_alcada_valor_superior !== undefined ? Number(compras_alcada_valor_superior) || 0 : sistema.compras_alcada_valor_superior,
+      limite_divida_cliente: limite_divida_cliente !== undefined
+        ? Math.max(0, Number(limite_divida_cliente) || 0)
+        : sistema.limite_divida_cliente,
     });
     return res.json(sistema);
   } catch (e) {

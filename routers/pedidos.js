@@ -18,5 +18,6 @@ router.post("/:id/aprovar", requireQualquerPermissao([["compras", "aprovar"], ["
 router.post("/:id/rejeitar", requireQualquerPermissao([["compras", "aprovar"], ["estoque", "aprovar"]]), PedidoController.rejeitar);
 router.post("/:id/enviar", requireQualquerPermissao(PEDIDOS_EDITAR), PedidoController.enviar);
 router.post("/:id/receber", requireQualquerPermissao(PEDIDOS_EDITAR), PedidoController.receber);
+router.post("/:id/pagar", requireQualquerPermissao(PEDIDOS_EDITAR), PedidoController.pagar);
 
 module.exports = router;

@@ -3,6 +3,7 @@ const { Transaction } = require("sequelize");
 const validador = require("../validators/orcamento");
 const estoqueService = require("../services/estoque");
 const notificacoesService = require("../services/notificacoes");
+const limiteDivida = require("../services/limiteDivida");
 
 const ESTADOS = ["pendente", "aprovado", "cancelado", "rejeitado", "anulado"];
 
@@ -416,11 +417,34 @@ exports.buscarPorId = async (req, res) => {
   }
 };
 
+// Consulta usada pelo formulário de orçamento para avisar o comercial antes
+// de submeter. O bloqueio definitivo é feito também no backend, em criar().
+exports.saldoCliente = async (req, res) => {
+  try {
+    const clienteId = req.params.clienteId;
+    const cliente = await Cliente.findOne({
+      where: { id: clienteId, organizacao_id: req.organizacao_id },
+      attributes: ["id", "nome", "empresa"],
+    });
+    if (!cliente) return res.status(404).json({ erro: "Cliente não encontrado" });
+    const info = await limiteDivida.verificar(req.organizacao_id, cliente.id);
+    return res.json({ cliente_id: cliente.id, cliente: cliente.nome || cliente.empresa || "", ...info });
+  } catch (e) {
+    console.error("Erro ao consultar saldo do cliente:", e);
+    return res.status(500).json({ erro: "Erro ao consultar saldo do cliente" });
+  }
+};
+
 exports.criar = async (req, res) => {
   try {
     const validacao = validador.criar(req.body);
     if (validacao.erro) return res.status(422).json({ erro: validacao.erro });
     if (req.body.estado && !ESTADOS.includes(req.body.estado)) return res.status(422).json({ erro: "Estado inválido" });
+    // O limite é global e só a Administração pode ultrapassá-lo.
+    const limite = await limiteDivida.verificar(req.organizacao_id, req.body.cliente_id);
+    if (limite.bloqueado && req.usuario?.perfil !== "admin") {
+      return res.status(403).json({ erro: limite.mensagem, ...limite });
+    }
     const dados = normalizarDados(req.body);
     const numero = dados.numero || (await proximoNumero(req.organizacao_id));
     const orcamento = await Orcamento.create({

@@ -10,6 +10,8 @@ router.use(auth);
 const ORCAMENTOS_LENDER = requirePermissao.requireQualquerPermissao([["comercial", "ver"], ["producao", "ver"]]);
 
 router.get("/", ORCAMENTOS_LENDER, OrcamentoController.listar);
+// Antes de /:id: permite ao Comercial consultar o saldo antes de criar.
+router.get("/saldo-cliente/:clienteId", requirePermissao("comercial", "criar"), OrcamentoController.saldoCliente);
 router.get("/:id", ORCAMENTOS_LENDER, OrcamentoController.buscarPorId);
 router.post("/", requirePermissao("comercial", "criar"), OrcamentoController.criar);
 router.post("/:id/enviar-producao", requirePermissao("comercial", "editar"), OrcamentoController.enviarProducao);

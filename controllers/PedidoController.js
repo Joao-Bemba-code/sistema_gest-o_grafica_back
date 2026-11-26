@@ -1,13 +1,42 @@
-const { sequelize, Pedido, PedidoItem, Material, MovimentoEstoque, Sequencia, Sistema } = require("../models");
+const { sequelize, Pedido, PedidoItem, Material, MovimentoEstoque, Sequencia, Sistema, TesourariaMovimento, ContaBancaria } = require("../models");
 const { Transaction } = require("sequelize");
 const notificacoesService = require("../services/notificacoes");
 
 const ESTADOS = ["pendente", "aprovado", "enviado", "recebido", "rejeitado", "cancelado"];
+const METODOS_PAGAMENTO = ["dinheiro", "transferencia", "deposito", "ordem_saida", "multicaixa", "referencia", "cheque", "tpa"];
 
 function parseNum(v) {
   if (v === undefined || v === null || v === "") return 0;
   const s = String(v).replace(/[^\d,.\-]/g, "").replace(",", ".");
   return parseFloat(s) || 0;
+}
+
+function isoDe(d) {
+  return d.toISOString().slice(0, 10);
+}
+
+function hojeISO() {
+  return isoDe(new Date());
+}
+
+function vencimentoPadrao() {
+  const d = new Date();
+  d.setDate(d.getDate() + 30);
+  return isoDe(d);
+}
+
+// Nenhuma compra pode ser registada sem preço: valida antes de normalizar,
+// para que um preço ausente não seja convertido silenciosamente em zero.
+function validarPrecos(itens) {
+  const invalidos = [];
+  (Array.isArray(itens) ? itens : []).forEach((i, idx) => {
+    if (!i.material_id && !String(i.material_nome || "").trim()) return; // linha vazia
+    const preco = parseNum(i.preco_unit != null ? i.preco_unit : i.preco);
+    if (!(preco > 0)) invalidos.push(String(i.material_nome || i.material_codigo || i.material_id || idx + 1));
+  });
+  return invalidos.length
+    ? `Informe o preço unitário de todos os materiais: ${invalidos.join(", ")}.`
+    : null;
 }
 
 function normalizarItens(itens, materiaisPorId) {
@@ -27,6 +56,54 @@ function normalizarItens(itens, materiaisPorId) {
       };
     })
     .filter((i) => i.material_nome && i.quantidade > 0);
+}
+
+// Um pagamento de fornecedor gera uma saída na Tesouraria e baixa o saldo da
+// conta indicada. Chamado tanto no pagamento à vista como no crédito.
+async function lancarPagamento({ pedido, req, t, valor, contaId, metodo, dataPagamento, observacoes }) {
+  const movimento = await TesourariaMovimento.create(
+    {
+      organizacao_id: req.organizacao_id,
+      usuario_id: req.usuario.id,
+      tipo: "saida",
+      categoria: "compra",
+      descricao: `Pagamento da encomenda ${pedido.numero} — ${pedido.fornecedor_nome}`,
+      valor,
+      data_movimento: dataPagamento,
+      hora_movimento: new Date().toTimeString().split(" ")[0],
+      referencia: String(pedido.numero),
+      referencia_tipo: "outro",
+      referencia_id: pedido.id,
+      conta_bancaria_id: contaId || null,
+      metodo_pagamento: metodo,
+      estado: "confirmado",
+      observacoes: observacoes || `Pagamento da encomenda ${pedido.numero} (pedido #${pedido.id})`,
+    },
+    { transaction: t }
+  );
+
+  if (contaId) {
+    const conta = await ContaBancaria.findOne({
+      where: { id: contaId, organizacao_id: req.organizacao_id },
+      transaction: t,
+    });
+    if (conta) {
+      const saldo = Number((Number(conta.saldo_atual || 0) - valor).toFixed(2));
+      await conta.update({ saldo_atual: saldo }, { transaction: t });
+    }
+  }
+
+  const valorPago = Number((Number(pedido.valor_pago || 0) + valor).toFixed(2));
+  await pedido.update(
+    {
+      valor_pago: valorPago,
+      data_pagamento: dataPagamento,
+      metodo_pagamento: metodo,
+      conta_bancaria_id: contaId || pedido.conta_bancaria_id || null,
+    },
+    { transaction: t }
+  );
+  return movimento;
 }
 
 function serializar(p) {
@@ -56,6 +133,14 @@ function serializar(p) {
     data_pedido: p.data_pedido || p.createdAt,
     data_recebimento: p.data_recebimento,
     total: Number(p.total) || 0,
+    forma_pagamento: p.forma_pagamento || "a_vista",
+    data_vencimento: p.data_vencimento || null,
+    valor_pago: Number(p.valor_pago) || 0,
+    saldo: Math.max(0, Number((Number(p.total) || 0) - (Number(p.valor_pago) || 0)).toFixed(2)),
+    pago: Number((Number(p.total) || 0) - (Number(p.valor_pago) || 0)) <= 0.005,
+    data_pagamento: p.data_pagamento || null,
+    metodo_pagamento: p.metodo_pagamento || null,
+    conta_bancaria_id: p.conta_bancaria_id || null,
     itens,
     pendente: itens.some((i) => i.quantidade_recebida < i.quantidade),
   };
@@ -124,10 +209,32 @@ exports.buscarPorId = async (req, res) => {
 exports.criar = async (req, res) => {
   const t = await sequelize.transaction();
   try {
-    const { fornecedor_id, fornecedor_nome, itens, observacoes, solicitado_por, data_pedido } = req.body;
+    const {
+      fornecedor_id, fornecedor_nome, itens, observacoes, solicitado_por, data_pedido,
+      forma_pagamento, data_vencimento, metodo_pagamento, conta_bancaria_id,
+    } = req.body;
     if (!fornecedor_nome || !String(fornecedor_nome).trim()) {
       await t.rollback();
       return res.status(422).json({ erro: "Informe o fornecedor do pedido" });
+    }
+    const erroPreco = validarPrecos(itens);
+    if (erroPreco) {
+      await t.rollback();
+      return res.status(422).json({ erro: erroPreco });
+    }
+    const forma = forma_pagamento === "credito" ? "credito" : "a_vista";
+    const vencimento = data_vencimento || (forma === "credito" ? vencimentoPadrao() : null);
+    const metodo = METODOS_PAGAMENTO.includes(metodo_pagamento) ? metodo_pagamento : null;
+    const contaId = conta_bancaria_id || null;
+    if (contaId) {
+      const conta = await ContaBancaria.findOne({
+        where: { id: contaId, organizacao_id: req.organizacao_id },
+        transaction: t,
+      });
+      if (!conta) {
+        await t.rollback();
+        return res.status(422).json({ erro: "Conta bancária inválida" });
+      }
     }
     const materiaisPorId = await carregarMateriaisPorId(
       (itens || []).map((i) => i.material_id),
@@ -160,6 +267,9 @@ exports.criar = async (req, res) => {
         data_pedido: data_pedido || new Date(),
         data_envio: requerAprovacao ? null : new Date(),
         total,
+        forma_pagamento: forma,
+        data_vencimento: vencimento,
+        conta_bancaria_id: forma === "a_vista" ? contaId : null,
         usuario_id: req.usuario.id,
       },
       { transaction: t }
@@ -168,6 +278,18 @@ exports.criar = async (req, res) => {
       normalizados.map((i) => ({ ...i, pedido_id: pedido.id })),
       { transaction: t }
     );
+    if (forma === "a_vista" && total > 0) {
+      await lancarPagamento({
+        pedido,
+        req,
+        t,
+        valor: total,
+        contaId,
+        metodo: metodo || "dinheiro",
+        dataPagamento: hojeISO(),
+        observacoes: `Pagamento à vista da encomenda ${numero}`,
+      });
+    }
     await t.commit();
     try {
       await notificacoesService.criar({
@@ -394,5 +516,84 @@ exports.receber = async (req, res) => {
     await t.rollback();
     console.error("Erro ao receber pedido:", e);
     return res.status(500).json({ erro: "Erro ao receber pedido" });
+  }
+};
+
+// Pagamento posterior de uma compra a crédito. Lança a saída na tesouraria e
+// atualiza o saldo da conta; aceita pagamentos parciais.
+exports.pagar = async (req, res) => {
+  const t = await sequelize.transaction();
+  try {
+    const pedido = await Pedido.findOne({
+      where: { id: req.params.id, organizacao_id: req.organizacao_id },
+      include: [{ model: PedidoItem, required: false }],
+      transaction: t,
+    });
+    if (!pedido) {
+      await t.rollback();
+      return res.status(404).json({ erro: "Pedido não encontrado" });
+    }
+    if (pedido.estado === "cancelado") {
+      await t.rollback();
+      return res.status(422).json({ erro: "Não é possível pagar uma encomenda cancelada" });
+    }
+    const saldo = Math.max(0, Number((Number(pedido.total || 0) - Number(pedido.valor_pago || 0)).toFixed(2)));
+    if (saldo <= 0.005) {
+      await t.rollback();
+      return res.status(422).json({ erro: "Esta encomenda já está totalmente paga" });
+    }
+
+    const valor = req.body.valor === undefined || req.body.valor === null || req.body.valor === ""
+      ? saldo
+      : Number(req.body.valor);
+    if (!(valor > 0)) {
+      await t.rollback();
+      return res.status(422).json({ erro: "O valor do pagamento deve ser maior que zero" });
+    }
+    if (valor > saldo + 0.005) {
+      await t.rollback();
+      return res.status(422).json({ erro: `O pagamento não pode ultrapassar ${saldo.toFixed(2)} Kz` });
+    }
+
+    const contaId = req.body.conta_bancaria_id || pedido.conta_bancaria_id || null;
+    if (contaId) {
+      const conta = await ContaBancaria.findOne({
+        where: { id: contaId, organizacao_id: req.organizacao_id },
+        transaction: t,
+      });
+      if (!conta) {
+        await t.rollback();
+        return res.status(422).json({ erro: "Conta bancária inválida" });
+      }
+    }
+    const metodo = METODOS_PAGAMENTO.includes(req.body.metodo_pagamento)
+      ? req.body.metodo_pagamento
+      : pedido.metodo_pagamento || "transferencia";
+    const dataPagamento = req.body.data_pagamento || hojeISO();
+
+    const movimento = await lancarPagamento({
+      pedido,
+      req,
+      t,
+      valor,
+      contaId,
+      metodo,
+      dataPagamento,
+      observacoes: req.body.observacoes
+        ? `Pagamento da encomenda ${pedido.numero} — ${String(req.body.observacoes).slice(0, 200)}`
+        : undefined,
+    });
+    await t.commit();
+
+    const atualizado = await Pedido.findByPk(pedido.id, { include: [{ model: PedidoItem, required: false }] });
+    return res.json({
+      pedido: serializar(atualizado),
+      movimento: { id: movimento.id, valor: Number(movimento.valor), tipo: movimento.tipo },
+      saldo: Math.max(0, Number((atualizado.total - atualizado.valor_pago).toFixed(2))),
+    });
+  } catch (e) {
+    await t.rollback();
+    console.error("Erro ao pagar encomenda:", e);
+    return res.status(500).json({ erro: "Erro ao registar o pagamento da encomenda" });
   }
 };

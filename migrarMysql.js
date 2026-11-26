@@ -232,6 +232,17 @@ async function aplicarMigracoesMysql(sequelize) {
   await adicionar("orcamento_item", "toner_material_id", "INT NULL");
   await adicionar("orcamento_item", "toner_custo_unit", "DECIMAL(8,4) NOT NULL DEFAULT 0");
 
+  // Limite global de dívida por cliente. 0 (por omissão) = sem bloqueio.
+  await adicionar("sistema", "limite_divida_cliente", "DECIMAL(14,2) NOT NULL DEFAULT 0");
+
+  // Compras: crédito do fornecedor e pagamento registado na própria encomenda.
+  await adicionar("pedido", "forma_pagamento", "VARCHAR(20) NOT NULL DEFAULT 'a_vista'");
+  await adicionar("pedido", "data_vencimento", "DATE NULL");
+  await adicionar("pedido", "valor_pago", "DECIMAL(14,2) NOT NULL DEFAULT 0");
+  await adicionar("pedido", "data_pagamento", "DATE NULL");
+  await adicionar("pedido", "metodo_pagamento", "VARCHAR(50) NULL");
+  await adicionar("pedido", "conta_bancaria_id", "INT NULL");
+
   // Campo Família do Novo Recurso passou a ser editável (permite criar novas
   // famílias em texto livre). Deixa de ser ENUM de valores fixos para aceitar
   // qualquer família nova escrita pelo utilizador em produção. Nunca re-criar

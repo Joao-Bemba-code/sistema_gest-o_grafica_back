@@ -17,6 +17,14 @@ const Pedido = sequelize.define("pedido", {
   data_pedido: { type: DataTypes.DATE },
   data_recebimento: { type: DataTypes.DATE },
   total: { type: DataTypes.DECIMAL(14, 2), defaultValue: 0 },
+  // Crédito de fornecedor: "a_vista" liquida na criação; "credito" fica em
+  // aberto até ser registado o pagamento.
+  forma_pagamento: { type: DataTypes.STRING(20), defaultValue: "a_vista" },
+  data_vencimento: { type: DataTypes.DATEONLY },
+  valor_pago: { type: DataTypes.DECIMAL(14, 2), defaultValue: 0 },
+  data_pagamento: { type: DataTypes.DATEONLY },
+  metodo_pagamento: { type: DataTypes.STRING(50) },
+  conta_bancaria_id: { type: DataTypes.INTEGER },
   usuario_id: { type: DataTypes.INTEGER },
   deleted: { type: DataTypes.BOOLEAN, defaultValue: false },
   deletedAt: { type: DataTypes.DATE, allowNull: true },
