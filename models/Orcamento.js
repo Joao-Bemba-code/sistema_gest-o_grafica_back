@@ -21,9 +21,11 @@ const Orcamento = sequelize.define("orcamento", {
   condicoes_pagamento: { type: DataTypes.STRING(100) },
   iva: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
   desconto: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
+  // Desconto e aumento (juro) definidos em percentagem no orçamento.
+  desconto_percentual: { type: DataTypes.DECIMAL(5, 2), defaultValue: 0 },
+  aumento_percentual: { type: DataTypes.DECIMAL(5, 2), defaultValue: 0 },
   total_sem_iva: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
   total_iva: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
-  total_com_iva: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
   total_com_iva: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
   observacoes: { type: DataTypes.TEXT },
   usuario_id: { type: DataTypes.INTEGER },

@@ -41,7 +41,7 @@ function emitirToken(usuario) {
 }
 
 function semSenha(usuario) {
-  const { senha: _, ...dados } = usuario.toJSON ? usuario.toJSON() : usuario;
+  const { senha: _, pin_hash: __, ...dados } = usuario.toJSON ? usuario.toJSON() : usuario;
   return dados;
 }
 
@@ -122,7 +122,7 @@ exports.logout = (req, res) => {
 exports.perfil = async (req, res) => {
   try {
     const usuario = await Usuario.findByPk(req.usuario.id, {
-      attributes: { exclude: ["senha"] },
+      attributes: { exclude: ["senha", "pin_hash"] },
       include: [Organizacao],
     });
     return res.json(usuario);

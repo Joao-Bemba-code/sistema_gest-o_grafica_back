@@ -35,7 +35,7 @@ module.exports = async (req, res, next) => {
     if (estaRevogado(decoded.jti)) {
       return res.status(401).json({ erro: "Sessão terminada. Entre novamente." });
     }
-    const usuario = await Usuario.findByPk(decoded.id, { attributes: { exclude: ["senha"] } });
+    const usuario = await Usuario.findByPk(decoded.id, { attributes: { exclude: ["senha", "pin_hash"] } });
     if (!usuario || !usuario.ativo) {
       return res.status(401).json({ erro: "Usuário inválido ou inativo" });
     }

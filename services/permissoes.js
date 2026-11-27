@@ -1,6 +1,7 @@
 // ===== Definições de papéis (perfis) e permissões =====
 // Módulos disponíveis no sistema
 const MODULOS = [
+  "visao_geral", // painel executivo, aprovações, travas e ritual semanal
   "comercial",   // orçamentos, clientes
   "faturacao",   // faturação
   "tesouraria",  // tesouraria / contas bancárias
@@ -35,6 +36,7 @@ const PERFIS = {
   gestao: {
     label: "Gestão",
     permissoes: {
+      visao_geral: { ver: true, criar: true, editar: true, eliminar: true, aprovar: true },
       comercial: { ver: true, criar: true, editar: true, eliminar: true, aprovar: true },
       faturacao: { ver: true, criar: true, editar: true, eliminar: true, aprovar: true },
       tesouraria: { ver: true, criar: true, editar: true, eliminar: true, aprovar: true },
@@ -54,6 +56,7 @@ const PERFIS = {
   producao: {
     label: "Produção",
     permissoes: {
+      visao_geral: { ver: true, criar: true, editar: true, eliminar: false, aprovar: false },
       producao: { ver: true, criar: true, editar: true, eliminar: false, aprovar: false },
       comercial: { ver: true, criar: false, editar: false, eliminar: false, aprovar: false },
       maquinas: { ver: true, criar: false, editar: true, eliminar: false, aprovar: false },
@@ -73,6 +76,7 @@ const PERFIS = {
   leitura: {
     label: "Consulta",
     permissoes: {
+      visao_geral: { ver: true, criar: false, editar: false, eliminar: false, aprovar: false },
       comercial: { ver: true, criar: false, editar: false, eliminar: false, aprovar: false },
       faturacao: { ver: true, criar: false, editar: false, eliminar: false, aprovar: false },
       tesouraria: { ver: true, criar: false, editar: false, eliminar: false, aprovar: false },

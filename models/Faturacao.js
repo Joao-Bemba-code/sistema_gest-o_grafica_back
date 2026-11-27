@@ -24,9 +24,15 @@ const Faturacao = sequelize.define("faturacao", {
   valor: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
   valor_pago: { type: DataTypes.DECIMAL(12, 2), defaultValue: 0 },
   estado: {
-    type: DataTypes.ENUM("emitida", "paga", "parcial", "vencida", "cancelada"),
-    defaultValue: "emitida",
+    type: DataTypes.ENUM("em_analise", "emitida", "paga", "parcial", "vencida", "cancelada"),
+    defaultValue: "em_analise",
   },
+  // Aprovação no Comercial e validação na Tesouraria: a fatura nasce
+  // "em_analise" e só é contada/enviada à AGT depois de validada.
+  aprovado_por: { type: DataTypes.STRING(200) },
+  data_aprovacao: { type: DataTypes.DATE, allowNull: true },
+  validado_por: { type: DataTypes.STRING(200) },
+  data_validacao: { type: DataTypes.DATE, allowNull: true },
   anulado_por: { type: DataTypes.STRING(200) },
   data_anulacao: { type: DataTypes.DATE, allowNull: true },
   motivo_anulacao: { type: DataTypes.TEXT },

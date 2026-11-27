@@ -7,6 +7,9 @@ const Usuario = sequelize.define("usuario", {
   nome: { type: DataTypes.STRING(150), allowNull: false },
   email: { type: DataTypes.STRING(100), allowNull: false, unique: { name: "usuario_email_uk" } },
   senha: { type: DataTypes.STRING(255), allowNull: false },
+  // PIN eletrónico usado nas decisões da Visão Geral. Nunca é devolvido pela API.
+  pin_hash: { type: DataTypes.STRING(255) },
+  pin_atualizado_em: { type: DataTypes.DATE },
   token_version: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
   funcao: { type: DataTypes.STRING(50), defaultValue: "operador" },
   perfil: { type: DataTypes.STRING(50), defaultValue: "producao" },

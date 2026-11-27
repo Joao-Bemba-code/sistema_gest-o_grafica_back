@@ -106,4 +106,19 @@ function agtPronto(cfg) {
   );
 }
 
-module.exports = { configAGT, configSoftwareAGT, obterConfigAGT, agtPronto };
+// Lista legível do que ainda falta para poder emitir contra a AGT.
+function faltasAgt(cfg) {
+  const c = cfg || configAGT();
+  const faltas = [];
+  if (!c.ativo) faltas.push("comunicação com a AGT desligada");
+  if (!c.username) faltas.push("utilizador da AGT");
+  if (!c.password) faltas.push("senha da AGT");
+  if (!c.nif) faltas.push("NIF do contribuinte");
+  if (!c.productId) faltas.push("ID do software");
+  if (!c.softwareKey) faltas.push("chave privada do software");
+  if (!c.softwareValidationNumber) faltas.push("número de validação do software");
+  if (!c.taxpayerKey) faltas.push("chave privada do contribuinte");
+  return faltas;
+}
+
+module.exports = { configAGT, configSoftwareAGT, obterConfigAGT, agtPronto, faltasAgt };

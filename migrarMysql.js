@@ -135,6 +135,10 @@ async function aplicarMigracoesMysql(sequelize) {
   await adicionar("usuario", "perfil", "VARCHAR(50) NULL");
   await adicionar("usuario", "permissoes", "JSON NULL");
 
+  // PIN eletrónico das decisões da Visão Geral (hash bcrypt, nunca texto puro).
+  await adicionar("usuario", "pin_hash", "VARCHAR(255) NULL");
+  await adicionar("usuario", "pin_atualizado_em", "DATETIME NULL");
+
   // Revogação de sessões: token_version é incrementado quando a senha, o email
   // ou as permissões mudam.
   await adicionar("usuario", "token_version", "INT NOT NULL DEFAULT 0");

@@ -3,7 +3,7 @@ const { Usuario, LoginLog } = require("../models");
 const { PERFIS } = require("../services/permissoes");
 const auditoria = require("../services/auditoria");
 
-const EXCLUIR_SENHA = { exclude: ["senha"] };
+const EXCLUIR_SENHA = { exclude: ["senha", "pin_hash"] };
 
 exports.listar = async (req, res) => {
   try {
@@ -46,7 +46,7 @@ exports.criar = async (req, res) => {
       funcao: funcao || perfil || "operador",
     });
 
-    const { senha: _, ...dados } = novo.toJSON();
+    const { senha: _, pin_hash: __, ...dados } = novo.toJSON();
     auditoria.registrar({
       req,
       acao: "usuario.criar",
@@ -128,7 +128,7 @@ exports.atualizar = async (req, res) => {
       alvoId: usuario.id,
       detalhe: { email: usuario.email, mudancas },
     });
-    const { senha: _, ...dados } = usuario.toJSON();
+    const { senha: _, pin_hash: __, ...dados } = usuario.toJSON();
     return res.json(dados);
   } catch (e) {
     console.error("Erro ao atualizar utilizador:", e);

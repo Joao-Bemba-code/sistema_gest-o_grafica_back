@@ -1,16 +1,42 @@
-const { Faturacao, Cliente, Orcamento, OrcamentoItem, OrdemProducao, TesourariaMovimento, ContaBancaria, Organizacao, SerieAGT } = require("../models");
+const { Faturacao, FaturaAnexo, Cliente, Orcamento, OrcamentoItem, OrdemProducao, TesourariaMovimento, ContaBancaria, Organizacao, SerieAGT } = require("../models");
 const { Op } = require("sequelize");
 const agtClient = require("../services/agtClient");
-const { obterConfigAGT, agtPronto } = require("../services/agtConfig");
+const { obterConfigAGT, agtPronto, faltasAgt } = require("../services/agtConfig");
 const auditoria = require("../services/auditoria");
 const limiteDivida = require("../services/limiteDivida");
 const descontoPagamento = require("../services/descontoPagamento");
 
-const ESTADOS = ["emitida", "paga", "parcial", "vencida", "cancelada"];
+const ESTADOS = ["em_analise", "emitida", "paga", "parcial", "vencida", "cancelada"];
 const TIPOS = ["fatura", "recibo", "proforma", "nota_credito", "factura_recibo"];
+
+// Tipo devolvido ao browser derivado da extensão guardada, nunca do mimetype
+// enviado pelo cliente (que permitia servir HTML como se fosse PDF).
+const MIME_ANEXO = {
+  ".pdf": "application/pdf",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+};
+
+function mimeDoAnexo(nome) {
+  const ext = String(nome || "").toLowerCase().match(/\.[a-z0-9]+$/)?.[0] || "";
+  return MIME_ANEXO[ext] || "application/octet-stream";
+}
 
 // Tipos de documento que representam recebimento de dinheiro (geram entrada automática).
 const TIPOS_ENTRADA = ["fatura", "recibo", "factura_recibo"];
+
+// Include padrão de uma fatura com o cliente, orçamento, OP e anexos (sem o
+// conteúdo binário dos anexos, que só é devolvido no download).
+function includeFatura() {
+  return [
+    { model: Cliente, required: false },
+    { model: Orcamento, required: false },
+    { model: OrdemProducao, required: false },
+    { model: FaturaAnexo, as: "anexos", required: false, attributes: { exclude: ["conteudo"] } },
+  ];
+}
 
 /**
  * Regista automaticamente a ENTRADA de tesouraria quando uma fatura/recibo é
@@ -313,7 +339,7 @@ exports.listar = async (req, res) => {
     if (tipo) where.tipo = tipo;
     const faturas = await Faturacao.findAll({
       where,
-      include: [{ model: Cliente, required: false }, { model: Orcamento, required: false }, { model: OrdemProducao, required: false }],
+      include: includeFatura(),
       order: [["createdAt", "DESC"]],
     });
     return res.json(faturas);
@@ -327,7 +353,7 @@ exports.buscar = async (req, res) => {
   try {
     const fatura = await Faturacao.findOne({
       where: { id: req.params.id, organizacao_id: req.organizacao_id },
-      include: [{ model: Cliente, required: false }, { model: Orcamento, required: false }, { model: OrdemProducao, required: false }],
+      include: includeFatura(),
     });
     if (!fatura) return res.status(404).json({ erro: "Fatura não encontrada" });
     return res.json(fatura);
@@ -435,13 +461,12 @@ async function criarRegisto(req, body) {
     ? `Origem: ${ligados.orcamentos.map((o) => o.numero || o.id).join(", ")}`
     : "";
   let valorPago = parseFloat(body.valor_pago) || 0;
+  if (tipo === "factura_recibo") valorPago = totais.total;
   let estado = ESTADOS.includes(body.estado) ? body.estado : null;
-  if (tipo === "factura_recibo") {
-    estado = "paga";
-    valorPago = totais.total;
-  }
   if (!estado) {
-    estado = valorPago >= totais.total ? "paga" : valorPago > 0 ? "parcial" : "emitida";
+    if (tipo === "fatura") estado = "em_analise";
+    else if (tipo === "factura_recibo") estado = "paga";
+    else estado = valorPago >= totais.total ? "paga" : valorPago > 0 ? "parcial" : "emitida";
   }
   const numero = body.numero || (await proximoNumero(req.organizacao_id, tipo));
   const fatura = await Faturacao.create({
@@ -465,9 +490,10 @@ async function criarRegisto(req, body) {
     conta_bancaria_id: body.conta_bancaria_id || null,
     observacoes: body.observacoes ? `${body.observacoes}${origem ? ` · ${origem}` : ""}` : origem || null,
   });
-  // A submissão automática só acontece quando a empresa tem a configuração
-  // AGT completa; submitFaturaAGT devolve null nos restantes casos.
-  if (tipo === "fatura") {
+  // A submissão automática só acontece quando a fatura já foi validada na
+  // Tesouraria (estado != "em_analise") e a empresa tem a configuração AGT
+  // completa; submitFaturaAGT devolve null nos restantes casos.
+  if (tipo === "fatura" && estado !== "em_analise") {
     try {
       await submitFaturaAGT(fatura);
     } catch (eSubmit) {
@@ -477,7 +503,7 @@ async function criarRegisto(req, body) {
   if (estado === "paga" && valorPago > 0) {
     await registarEntradaTesouraria(req, { ...fatura.toJSON(), data_pagamento: fatura.data_pagamento }, valorPago, fatura.metodo_pagamento, fatura.conta_bancaria_id);
   }
-  return Faturacao.findByPk(fatura.id, { include: [{ model: Cliente, required: false }, { model: Orcamento, required: false }, { model: OrdemProducao, required: false }] });
+  return Faturacao.findByPk(fatura.id, { include: includeFatura() });
 }
 
 exports.criar = async (req, res) => {
@@ -546,7 +572,7 @@ exports.atualizar = async (req, res) => {
     if (estadoPos === "paga" && valorPos > 0) {
       await registarEntradaTesouraria(req, { ...fatura.toJSON(), data_pagamento: dados.data_pagamento || fatura.data_pagamento }, valorPos, dados.metodo_pagamento || dados.metodo || fatura.metodo_pagamento, dados.conta_bancaria_id || fatura.conta_bancaria_id);
     }
-    const completa = await Faturacao.findByPk(fatura.id, { include: [{ model: Cliente, required: false }, { model: Orcamento, required: false }, { model: OrdemProducao, required: false }] });
+    const completa = await Faturacao.findByPk(fatura.id, { include: includeFatura() });
     return res.json(completa);
   } catch (e) {
     console.error("Erro ao atualizar fatura:", e);
@@ -562,6 +588,9 @@ exports.marcarPaga = async (req, res) => {
     if (!fatura) return res.status(404).json({ erro: "Fatura não encontrada" });
     if (fatura.estado === "cancelada") {
       return res.status(400).json({ erro: "Fatura cancelada não pode ser marcada como paga" });
+    }
+    if (fatura.estado === "em_analise") {
+      return res.status(400).json({ erro: "A fatura está em análise. Valide-a na Tesouraria antes de registar pagamento." });
     }
     const body = req.body || {};
     const total = parseFloat(fatura.total || fatura.valor) || 0;
@@ -604,7 +633,7 @@ exports.marcarPaga = async (req, res) => {
         );
       }
     }
-    const completa = await Faturacao.findByPk(fatura.id, { include: [{ model: Cliente, required: false }, { model: Orcamento, required: false }, { model: OrdemProducao, required: false }] });
+    const completa = await Faturacao.findByPk(fatura.id, { include: includeFatura() });
     return res.json(completa);
   } catch (e) {
     console.error("Erro ao marcar fatura como paga:", e);
@@ -678,7 +707,7 @@ exports.anular = async (req, res) => {
         motivo,
       },
     });
-    const completa = await Faturacao.findByPk(fatura.id, { include: [{ model: Cliente, required: false }, { model: Orcamento, required: false }, { model: OrdemProducao, required: false }] });
+    const completa = await Faturacao.findByPk(fatura.id, { include: includeFatura() });
     return res.json({ ...completa.toJSON(), estornos: movimentos.length });
   } catch (e) {
     console.error("Erro ao anular fatura:", e);
@@ -714,7 +743,15 @@ exports.solicitarSerie = async (req, res) => {
       return res.status(400).json({ erro: "NIF da organização não definido" });
     }
     const cfg = await obterConfigAGT(req.organizacao_id);
-    if (!agtPronto(cfg)) return res.status(400).json({ erro: "Configuração AGT incompleta para esta empresa" });
+    if (!agtPronto(cfg)) {
+      const faltas = faltasAgt(cfg);
+      return res.status(400).json({
+        erro: faltas.length
+          ? `Configuração AGT incompleta. Faltam: ${faltas.join(", ")}.`
+          : "Configuração AGT incompleta para esta empresa",
+        faltas,
+      });
+    }
     const nif = cfg.nif || String(organizacao.nif).trim();
     const ano = parseInt(req.body?.seriesYear, 10) || new Date().getFullYear();
     const documentType = req.body?.documentType || "FT";
@@ -797,12 +834,131 @@ exports.enviarAGT = async (req, res) => {
       return res.status(400).json({ erro: "Apenas faturas (FT) são enviadas à AGT por agora" });
     }
     const cfg = await obterConfigAGT(req.organizacao_id);
-    if (!agtPronto(cfg)) return res.status(400).json({ erro: "Configuração AGT incompleta para esta empresa" });
+    if (!agtPronto(cfg)) {
+      const faltas = faltasAgt(cfg);
+      return res.status(400).json({
+        erro: faltas.length
+          ? `Configuração AGT incompleta. Faltam: ${faltas.join(", ")}.`
+          : "Configuração AGT incompleta para esta empresa",
+        faltas,
+      });
+    }
     const agt_envio = await submitFaturaAGT(fatura);
-    const completa = await Faturacao.findByPk(fatura.id, { include: [{ model: Cliente, required: false }] });
+    const completa = await Faturacao.findByPk(fatura.id, { include: includeFatura() });
     return res.json({ ...completa.toJSON(), agt_envio });
   } catch (e) {
     console.error("Erro ao enviar fatura à AGT:", e);
     return res.status(500).json({ erro: "Erro ao enviar fatura à AGT", detalhes: e.detalhes || e.message });
+  }
+};
+
+// Validação na Tesouraria: a fatura nasce "em_analise" no Comercial e só aqui
+// passa a "emitida", entrando no fluxo normal (contagem de dívida e envio à AGT).
+exports.validar = async (req, res) => {
+  try {
+    const fatura = await Faturacao.findOne({
+      where: { id: req.params.id, organizacao_id: req.organizacao_id },
+    });
+    if (!fatura) return res.status(404).json({ erro: "Fatura não encontrada" });
+    if (fatura.estado !== "em_analise") {
+      return res.status(422).json({ erro: "Apenas faturas em análise podem ser validadas" });
+    }
+    await fatura.update({
+      estado: "emitida",
+      validado_por: req.usuario?.nome || req.usuario?.email || null,
+      data_validacao: new Date(),
+    });
+    // Só depois de validada é que a fatura é submetida à AGT (quando configurada).
+    if (fatura.tipo === "fatura") {
+      try {
+        await submitFaturaAGT(fatura);
+      } catch (eSubmit) {
+        console.error("AGT: falha ao submeter fatura após validação", eSubmit.detalhes || eSubmit.message);
+      }
+    }
+    auditoria.registrar({
+      req,
+      acao: "faturacao.validar",
+      alvoTipo: "fatura",
+      alvoId: fatura.id,
+      detalhe: { numero: fatura.numero, estado: "emitida" },
+    });
+    const completa = await Faturacao.findByPk(fatura.id, { include: includeFatura() });
+    return res.json(completa);
+  } catch (e) {
+    console.error("Erro ao validar fatura:", e);
+    return res.status(500).json({ erro: "Erro ao validar fatura" });
+  }
+};
+
+// Anexa ficheiros (PDF/imagem) a uma fatura — comprovativos/autorizações.
+// O conteúdo é guardado na base de dados (BLOB) para sobreviver a redeploys.
+exports.anexarFicheiros = async (req, res) => {
+  try {
+    const fatura = await Faturacao.findOne({
+      where: { id: req.params.id, organizacao_id: req.organizacao_id },
+    });
+    if (!fatura) return res.status(404).json({ erro: "Fatura não encontrada" });
+
+    const ficheiros = req.files || [];
+    if (!ficheiros.length) return res.status(400).json({ erro: "Nenhum ficheiro recebido" });
+
+    const anexos = [];
+    for (const f of ficheiros) {
+      anexos.push(await FaturaAnexo.create({
+        organizacao_id: req.organizacao_id,
+        fatura_id: fatura.id,
+        nome_original: f.originalname || f.filename || "anexo",
+        mime: f.mimetype || "",
+        tamanho: f.size || 0,
+        conteudo: f.buffer || null,
+      }));
+    }
+    return res.status(201).json(anexos);
+  } catch (e) {
+    console.error("Erro ao anexar ficheiros à fatura:", e);
+    return res.status(500).json({ erro: "Erro ao anexar ficheiros" });
+  }
+};
+
+// Devolve o conteúdo do anexo (PDF/imagem) guardado na base de dados.
+exports.downloadAnexo = async (req, res) => {
+  try {
+    const anexo = await FaturaAnexo.findOne({
+      where: { id: req.params.anexoId, organizacao_id: req.organizacao_id },
+    });
+    if (!anexo) return res.status(404).json({ erro: "Anexo não encontrado" });
+    if (!anexo.conteudo || !anexo.conteudo.length) {
+      return res.status(410).json({ erro: "Ficheiro indisponível (não existe cópia guardada)" });
+    }
+
+    const nomeSeguro = String(anexo.nome_original || "anexo").replace(/[^\w.\- ]+/g, "_");
+    const mime = mimeDoAnexo(nomeSeguro);
+    res.setHeader("Content-Type", mime);
+    res.setHeader("Content-Length", anexo.conteudo.length);
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    const disposicao = mime === "application/octet-stream" ? "attachment" : "inline";
+    res.setHeader("Content-Disposition", `${disposicao}; filename*=UTF-8''${encodeURIComponent(nomeSeguro)}`);
+    return res.end(anexo.conteudo);
+  } catch (e) {
+    console.error("Erro ao devolver anexo da fatura:", e);
+    return res.status(500).json({ erro: "Erro ao devolver anexo" });
+  }
+};
+
+// Remove um anexo (o conteúdo está na base de dados).
+exports.removerAnexo = async (req, res) => {
+  try {
+    const anexo = await FaturaAnexo.findOne({
+      where: { id: req.params.anexoId, organizacao_id: req.organizacao_id },
+    });
+    if (!anexo) return res.status(404).json({ erro: "Anexo não encontrado" });
+
+    await anexo.destroy();
+    return res.json({ mensagem: "Anexo removido" });
+  } catch (e) {
+    console.error("Erro ao remover anexo da fatura:", e);
+    return res.status(500).json({ erro: "Erro ao remover anexo" });
   }
 };

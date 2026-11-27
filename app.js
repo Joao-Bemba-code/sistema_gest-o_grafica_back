@@ -144,6 +144,7 @@ function criarApp(opcoes = {}) {
       })
     );
     app.use("/api/auth", require("./routers/auth"));
+    app.use("/api/visao-geral", require("./routers/visaoGeral"));
     app.use("/api/usuarios", require("./routers/usuarios"));
     app.use("/api/clientes", require("./routers/clientes"));
     app.use("/api/materiais", require("./routers/materiais"));

@@ -16,6 +16,7 @@ const Acabamento = require("./Acabamento");
 const Qualidade = require("./Qualidade");
 const ReservaEstoque = require("./ReservaEstoque");
 const Faturacao = require("./Faturacao");
+const FaturaAnexo = require("./FaturaAnexo");
 const Sistema = require("./Sistema");
 const Seguranca = require("./Seguranca");
 const Fornecedor = require("./Fornecedor");
@@ -45,6 +46,13 @@ const Proposta = require("./Proposta");
 const PropostaEvento = require("./PropostaEvento");
 const PropostaDocumento = require("./PropostaDocumento");
 const ClienteDocumento = require("./ClienteDocumento");
+const FechoDiario = require("./FechoDiario");
+const MetaUnidade = require("./MetaUnidade");
+const AprovacaoGestao = require("./AprovacaoGestao");
+const TravaSistemica = require("./TravaSistemica");
+const ReuniaoSemanal = require("./ReuniaoSemanal");
+const AcaoSemanal = require("./AcaoSemanal");
+const VisaoGeralAnexo = require("./VisaoGeralAnexo");
 
 SuporteUsuario.hasMany(SuporteAuditoria, { foreignKey: "suporte_usuario_id" });
 SuporteAuditoria.belongsTo(SuporteUsuario, { foreignKey: "suporte_usuario_id" });
@@ -158,6 +166,9 @@ Faturacao.belongsTo(Cliente, { foreignKey: "cliente_id" });
 OrdemProducao.hasMany(Faturacao, { foreignKey: "ordem_producao_id" });
 Faturacao.belongsTo(OrdemProducao, { foreignKey: "ordem_producao_id" });
 
+Faturacao.hasMany(FaturaAnexo, { foreignKey: "fatura_id", as: "anexos" });
+FaturaAnexo.belongsTo(Faturacao, { foreignKey: "fatura_id" });
+
 Organizacao.hasMany(SerieAGT, { foreignKey: "organizacao_id" });
 SerieAGT.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
 
@@ -258,6 +269,49 @@ PropostaDocumento.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
 Proposta.hasMany(PropostaDocumento, { foreignKey: "proposta_id", as: "documentos" });
 PropostaDocumento.belongsTo(Proposta, { foreignKey: "proposta_id" });
 
+Organizacao.hasMany(FechoDiario, { foreignKey: "organizacao_id" });
+FechoDiario.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
+Usuario.hasMany(FechoDiario, { foreignKey: "usuario_id" });
+FechoDiario.belongsTo(Usuario, { foreignKey: "usuario_id", as: "usuario" });
+
+Organizacao.hasMany(MetaUnidade, { foreignKey: "organizacao_id" });
+MetaUnidade.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
+Usuario.hasMany(MetaUnidade, { foreignKey: "usuario_id" });
+MetaUnidade.belongsTo(Usuario, { foreignKey: "usuario_id", as: "usuario" });
+
+Organizacao.hasMany(AprovacaoGestao, { foreignKey: "organizacao_id" });
+AprovacaoGestao.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
+Usuario.hasMany(AprovacaoGestao, { foreignKey: "criado_por", as: "aprovacoes_criadas" });
+AprovacaoGestao.belongsTo(Usuario, { foreignKey: "criado_por", as: "criador" });
+Usuario.hasMany(AprovacaoGestao, { foreignKey: "decidido_por", as: "aprovacoes_decididas" });
+AprovacaoGestao.belongsTo(Usuario, { foreignKey: "decidido_por", as: "decisor" });
+
+Organizacao.hasMany(TravaSistemica, { foreignKey: "organizacao_id" });
+TravaSistemica.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
+Usuario.hasMany(TravaSistemica, { foreignKey: "criado_por", as: "travas_criadas" });
+TravaSistemica.belongsTo(Usuario, { foreignKey: "criado_por", as: "criador" });
+Usuario.hasMany(TravaSistemica, { foreignKey: "regularizado_por", as: "travas_regularizadas" });
+TravaSistemica.belongsTo(Usuario, { foreignKey: "regularizado_por", as: "regularizador" });
+
+Organizacao.hasMany(ReuniaoSemanal, { foreignKey: "organizacao_id" });
+ReuniaoSemanal.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
+Usuario.hasMany(ReuniaoSemanal, { foreignKey: "usuario_id" });
+ReuniaoSemanal.belongsTo(Usuario, { foreignKey: "usuario_id", as: "usuario" });
+ReuniaoSemanal.hasMany(AcaoSemanal, { foreignKey: "ata_id", as: "acoes" });
+AcaoSemanal.belongsTo(ReuniaoSemanal, { foreignKey: "ata_id", as: "ata" });
+
+Organizacao.hasMany(AcaoSemanal, { foreignKey: "organizacao_id" });
+AcaoSemanal.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
+Usuario.hasMany(AcaoSemanal, { foreignKey: "responsavel_id", as: "acoes_responsaveis" });
+AcaoSemanal.belongsTo(Usuario, { foreignKey: "responsavel_id", as: "responsavel" });
+Usuario.hasMany(AcaoSemanal, { foreignKey: "criado_por", as: "acoes_criadas" });
+AcaoSemanal.belongsTo(Usuario, { foreignKey: "criado_por", as: "criador" });
+
+Organizacao.hasMany(VisaoGeralAnexo, { foreignKey: "organizacao_id" });
+VisaoGeralAnexo.belongsTo(Organizacao, { foreignKey: "organizacao_id" });
+Usuario.hasMany(VisaoGeralAnexo, { foreignKey: "usuario_id" });
+VisaoGeralAnexo.belongsTo(Usuario, { foreignKey: "usuario_id", as: "usuario" });
+
 module.exports = {
   sequelize,
   Organizacao,
@@ -281,6 +335,7 @@ module.exports = {
   Qualidade,
   ReservaEstoque,
   Faturacao,
+  FaturaAnexo,
   Sistema,
   Seguranca,
   Sequencia,
@@ -306,4 +361,11 @@ module.exports = {
   PropostaEvento,
   PropostaDocumento,
   ClienteDocumento,
+  FechoDiario,
+  MetaUnidade,
+  AprovacaoGestao,
+  TravaSistemica,
+  ReuniaoSemanal,
+  AcaoSemanal,
+  VisaoGeralAnexo,
 };

@@ -102,7 +102,9 @@ async function buscarFaturas(organizacaoId, clienteId) {
   const where = {
     organizacao_id: organizacaoId,
     tipo: { [Op.in]: TIPOS_DIVIDA },
-    estado: { [Op.notIn]: ["paga", "cancelada"] },
+    // Faturas "em_analise" ainda não foram validadas na Tesouraria: não contam
+    // como dívida nem para o limite de crédito.
+    estado: { [Op.notIn]: ["paga", "cancelada", "em_analise"] },
   };
   if (clienteId) where.cliente_id = clienteId;
   return Faturacao.findAll({

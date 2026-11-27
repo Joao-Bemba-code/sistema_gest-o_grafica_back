@@ -40,6 +40,8 @@ function normalizarDados(body) {
     condicoes_pagamento: body.condicoesPagamento,
     iva: body.iva != null ? body.iva : 0,
     desconto: body.desconto != null ? body.desconto : 0,
+    desconto_percentual: body.desconto_percentual != null ? body.desconto_percentual : (body.descontoPercentual != null ? body.descontoPercentual : 0),
+    aumento_percentual: body.aumento_percentual != null ? body.aumento_percentual : (body.aumentoPercentual != null ? body.aumentoPercentual : 0),
     observacoes: body.observacoes,
   };
   if (Object.keys(spec).length) dados.especificacao_json = spec;
@@ -216,6 +218,8 @@ function serializar(o) {
     servicos,
     subtotal: Number(o.total_sem_iva) || 0,
     desconto: Number(o.desconto) || 0,
+    descontoPercentual: Number(o.desconto_percentual) || 0,
+    aumentoPercentual: Number(o.aumento_percentual) || 0,
     iva: Number(o.iva) || 0,
     valorIva: Number(o.total_iva) || 0,
     total: Number(o.total_com_iva) || 0,
@@ -594,12 +598,20 @@ async function recalcularTotais(orcamentoId) {
   const totalServicos = servicos.reduce((s, sv) => s + parseFloat(sv.total || 0), 0);
   const totalSemIva = totalItens + totalServicos;
   const orcamento = await Orcamento.findByPk(orcamentoId);
-  const desconto = parseFloat(orcamento.desconto || 0);
-  const totalPosDesconto = Math.max(0, totalSemIva - desconto);
+  // Desconto e aumento em percentagem (definidos no orçamento). Se o desconto
+  // em percentagem for 0, usa-se o valor absoluto (compatibilidade antiga).
+  const descontoPct = parseFloat(orcamento.desconto_percentual || 0);
+  const aumentoPct = parseFloat(orcamento.aumento_percentual || 0);
+  const desconto = descontoPct > 0
+    ? totalSemIva * (descontoPct / 100)
+    : parseFloat(orcamento.desconto || 0);
+  const aumento = aumentoPct > 0 ? totalSemIva * (aumentoPct / 100) : 0;
+  const totalPosDesconto = Math.max(0, totalSemIva - desconto + aumento);
   const ivaPct = parseFloat(orcamento.iva || 0);
   const totalIva = totalPosDesconto * (ivaPct / 100);
   await orcamento.update({
     total_sem_iva: totalSemIva,
+    desconto: Number(desconto.toFixed(2)),
     total_iva: Number(totalIva.toFixed(2)),
     total_com_iva: Number((totalPosDesconto + totalIva).toFixed(2)),
   });
