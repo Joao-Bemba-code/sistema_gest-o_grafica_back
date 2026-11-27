@@ -344,6 +344,36 @@ async function aplicarMigracoesMysql(sequelize) {
   // Conta bancária associada à fatura (onde o pagamento foi recebido).
   await adicionar("faturacao", "conta_bancaria_id", "INT NULL");
 
+  // Fatura nasce "em_analise" no Comercial e é validada na Tesouraria:
+  // registo de quem aprovou/validou e datas correspondentes.
+  await adicionar("faturacao", "aprovado_por", "VARCHAR(200) NULL");
+  await adicionar("faturacao", "data_aprovacao", "DATETIME NULL");
+  await adicionar("faturacao", "validado_por", "VARCHAR(200) NULL");
+  await adicionar("faturacao", "data_validacao", "DATETIME NULL");
+
+  // ENUM do estado da fatura passa a incluir 'em_analise'.
+  const fatEstRef = await sequelize.query(
+    "SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'faturacao' AND COLUMN_NAME = 'estado'",
+    { type: sequelize.QueryTypes.SELECT }
+  );
+  if (fatEstRef.length && fatEstRef[0].COLUMN_TYPE.includes("ENUM") && !fatEstRef[0].COLUMN_TYPE.includes("em_analise")) {
+    try {
+      await sequelize.query("SET SESSION sql_mode = 'NO_ENGINE_SUBSTITUTION'");
+      await sequelize.query(
+        "ALTER TABLE `faturacao` MODIFY `estado` ENUM('em_analise','emitida','paga','parcial','vencida','cancelada') NOT NULL DEFAULT 'em_analise'"
+      );
+      console.log("MIGRAÇÃO: faturacao.estado inclui 'em_analise'");
+    } catch (e) {
+      if (e.code === "WARN_DATA_TRUNCATED" || e.parent?.code === "WARN_DATA_TRUNCATED") {
+        console.log("MIGRAÇÃO: faturacao.estado actualizado");
+      } else throw e;
+    }
+  }
+
+  // Orçamento: desconto e aumento aplicados em percentagem.
+  await adicionar("orcamento", "desconto_percentual", "DECIMAL(5,2) NULL DEFAULT 0");
+  await adicionar("orcamento", "aumento_percentual", "DECIMAL(5,2) NULL DEFAULT 0");
+
   // 2FA TOTP das contas do painel de suporte (segredo cifrado na aplicação).
   await adicionar("suporte_usuario", "totp_secret", "TEXT NULL");
   await adicionar("suporte_usuario", "totp_confirmado", "TINYINT(1) NOT NULL DEFAULT 0");
